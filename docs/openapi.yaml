@@ -1,0 +1,46 @@
+openapi: 3.1.0
+info:
+  title: Start Back API
+  version: 1.0.0
+  description: Contrato HTTP versionado do backend.
+servers:
+  - url: http://localhost:3000/api/v1
+paths:
+  /health:
+    get:
+      operationId: getHealth
+      summary: Verifica a API e a conexão com o schema dedicado.
+      responses:
+        "200":
+          description: Serviços disponíveis.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+        "503":
+          description: Banco não configurado ou indisponível.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+components:
+  schemas:
+    HealthResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: object
+          required: [service, status, database, schema, timestamp]
+          properties:
+            service: { type: string, const: start-back-api }
+            status: { type: string, enum: [ok, degraded] }
+            database: { type: string, enum: [connected, unconfigured, unavailable] }
+            schema: { type: string, const: start_back }
+            timestamp: { type: string, format: date-time }
+        meta:
+          type: object
+          required: [requestId]
+          properties:
+            requestId: { type: string }
+

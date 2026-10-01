@@ -1,0 +1,21 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: apps/backend/Dockerfile
+    environment:
+      START_BACK_SUPABASE_URL: ${START_BACK_SUPABASE_URL:-}
+      START_BACK_SUPABASE_SERVICE_ROLE_KEY: ${START_BACK_SUPABASE_SERVICE_ROLE_KEY:-}
+      START_BACK_ALLOWED_ORIGINS: ${START_BACK_ALLOWED_ORIGINS:-http://localhost:8080}
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: apps/frontend/Dockerfile
+    depends_on:
+      - backend
+    ports:
+      - "${START_BACK_APP_PORT:-8080}:80"
+    restart: unless-stopped
+

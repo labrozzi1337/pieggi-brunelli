@@ -1,0 +1,240 @@
+@import url("https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Oxanium:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 205 40% 98%;
+    --foreground: 215 25% 14%;
+    --card: 210 25% 98%;
+    --card-foreground: 215 25% 14%;
+    --primary: 209 84% 36%;
+    --primary-foreground: 0 0% 100%;
+    --primary-glow: 197 71% 70%;
+    --secondary: 210 40% 96%;
+    --secondary-foreground: 215 25% 14%;
+    --muted: 210 30% 96%;
+    --muted-foreground: 215 14% 45%;
+    --accent: 207 80% 94%;
+    --accent-foreground: 215 25% 14%;
+    --destructive: 0 75% 55%;
+    --success: 160 70% 38%;
+    --warning: 38 92% 50%;
+    --border: 210 25% 90%;
+    --input: 210 25% 90%;
+    --ring: 209 84% 36%;
+    --hub-blue: 209 84% 36%;
+    --hub-blue-soft: 197 71% 70%;
+    --hub-amber: 38 92% 50%;
+    --hub-emerald: 160 70% 38%;
+    --hub-indigo: 215 60% 50%;
+    --hub-rose: 346 70% 55%;
+    --sb-open: 240px;
+    --sb-closed: 64px;
+  }
+
+  .dark {
+    --background: 0 0% 2.7%;
+    --foreground: 210 17% 92%;
+    --card: 220 10% 9%;
+    --card-foreground: 210 17% 92%;
+    --primary: 197 71% 70%;
+    --primary-foreground: 207 60% 8%;
+    --primary-glow: 197 71% 70%;
+    --secondary: 207 28% 14%;
+    --secondary-foreground: 210 17% 92%;
+    --muted: 207 28% 14%;
+    --muted-foreground: 215 14% 60%;
+    --accent: 197 50% 18%;
+    --accent-foreground: 210 17% 92%;
+    --destructive: 0 70% 50%;
+    --success: 160 60% 45%;
+    --warning: 38 92% 55%;
+    --border: 207 22% 17%;
+    --input: 207 22% 17%;
+    --ring: 197 71% 70%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html,
+  body,
+  button,
+  input,
+  select,
+  textarea {
+    font-family: "Oxanium", system-ui, sans-serif;
+  }
+
+  body {
+    @apply min-h-screen text-foreground antialiased;
+    background:
+      radial-gradient(circle at 95% 95%, hsl(207 80% 85% / 0.25), transparent 45%),
+      linear-gradient(180deg, hsl(0 0% 100% / 0.5), hsl(205 40% 98% / 0.85));
+    background-attachment: fixed;
+  }
+
+  .dark body {
+    background: #070707;
+  }
+}
+
+@layer components {
+  .brand-shell {
+    --shell-accent: 15 95 168;
+    --shell-accent-2: 126 204 228;
+    --shell-surface: 255 255 255;
+    --shell-canvas: 255 255 255;
+    --shell-text: 28 39 49;
+    --shell-muted: 104 119 132;
+    --shell-border: 226 231 235;
+    background: rgb(245 247 249);
+  }
+  .shell-auditto { --shell-accent: 102 44 234; --shell-accent-2: 167 105 238; --shell-surface: 255 255 255; --shell-canvas: 250 249 253; --shell-text: 16 8 40; --shell-muted: 105 102 120; --shell-border: 229 226 237; }
+  .shell-solutta { --shell-accent: 0 66 255; --shell-accent-2: 15 224 255; --shell-surface: 255 255 255; --shell-canvas: 249 250 253; --shell-text: 8 8 80; --shell-muted: 91 96 125; --shell-border: 220 225 239; }
+  .shell-alerta { --shell-accent: 214 151 0; --shell-accent-2: 255 188 11; --shell-surface: 255 255 255; --shell-canvas: 250 250 250; --shell-text: 24 24 24; --shell-muted: 102 102 102; --shell-border: 225 225 225; }
+  .dark .brand-shell { --shell-surface: 7 7 7; --shell-canvas: 10 10 10; --shell-text: 232 240 245; --shell-muted: 142 163 176; --shell-border: 36 42 47; background: #070707; }
+  .dark .shell-auditto { --shell-accent: 190 148 255; --shell-accent-2: 167 105 238; --shell-surface: 18 10 38; --shell-canvas: 14 8 30; --shell-text: 251 244 255; --shell-muted: 190 177 205; --shell-border: 53 39 75; }
+  .dark .shell-solutta { --shell-accent: 15 224 255; --shell-accent-2: 0 66 255; --shell-surface: 8 8 62; --shell-canvas: 8 8 48; --shell-text: 244 248 255; --shell-muted: 171 188 219; --shell-border: 34 49 108; }
+  .dark .shell-alerta { --shell-accent: 255 188 11; --shell-accent-2: 255 214 92; --shell-surface: 17 17 17; --shell-canvas: 20 20 20; --shell-text: 255 255 255; --shell-muted: 184 184 184; --shell-border: 51 51 51; }
+  .brand-sidebar, .brand-header, .brand-canvas { background: rgb(var(--shell-surface)); color: rgb(var(--shell-text)); border-color: rgb(var(--shell-border)); }
+  .brand-canvas { background: rgb(var(--shell-canvas)); }
+  .brand-header { background: rgb(var(--shell-surface) / .92); }
+  .brand-logo { background: linear-gradient(135deg, rgb(var(--shell-accent)), rgb(var(--shell-accent-2))); color: white; box-shadow: 0 5px 14px rgb(var(--shell-accent) / .18); }
+  .shell-alerta .brand-logo { color: #181818; }
+  .brand-muted { color: rgb(var(--shell-muted)); }
+  .brand-nav-idle { color: rgb(var(--shell-muted)); }
+  .brand-nav-idle:hover { color: rgb(var(--shell-text)); background: rgb(var(--shell-accent) / .06); }
+  .brand-nav-active { color: rgb(var(--shell-accent)); background: linear-gradient(90deg, rgb(var(--shell-accent) / .12), rgb(var(--shell-accent-2) / .06)); --tw-ring-color: rgb(var(--shell-accent) / .28); }
+
+  .hub-card {
+    background-color: #F7F9FB;
+    border: 1px solid hsl(0 0% 0% / 0.08);
+  }
+
+  .dark .hub-card {
+    background-color: #14161A;
+    border-color: hsl(0 0% 100% / 0.10);
+  }
+
+  .hub-gradient {
+    background: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--primary-glow)));
+  }
+
+  .hub-scroll {
+    scrollbar-color: hsl(var(--muted-foreground) / 0.3) transparent;
+    scrollbar-width: thin;
+  }
+
+  .eyebrow {
+    @apply text-[9px] font-semibold uppercase tracking-[0.18em] text-muted-foreground;
+  }
+
+  .hub-hero {
+    background: linear-gradient(135deg, #050e17 0%, #0b1a27 56%, #31576b 100%);
+    box-shadow: 0 22px 55px -28px rgba(5, 14, 23, 0.85);
+  }
+
+  .portfolio-card {
+    @apply relative overflow-hidden rounded-[14px] border p-5 transition-all duration-300 hover:-translate-y-1;
+  }
+
+  .portfolio-auditto { background: #fbfaff; border-color: rgba(102, 44, 234, .13); color: #100828; }
+  .portfolio-auditto:hover { box-shadow: 0 20px 40px rgba(102, 44, 234, .11); }
+  .portfolio-auditto .company-mark { background: linear-gradient(135deg, #662cea, #a769ee); color: white; }
+  .portfolio-auditto .chart-line { stroke: #662cea; }
+  .portfolio-auditto .chart-point { fill: #662cea; }
+  .portfolio-solutta { background: #f8faff; border-color: rgba(0, 66, 255, .13); color: #080850; }
+  .portfolio-solutta:hover { box-shadow: 0 20px 40px rgba(0, 66, 255, .11); }
+  .portfolio-solutta .company-mark { background: linear-gradient(135deg, #0042ff, #0fe0ff); color: white; }
+  .portfolio-solutta .chart-line { stroke: #0042ff; }
+  .portfolio-solutta .chart-point { fill: #0042ff; }
+  .portfolio-alerta { background: #1d1d1d; border-color: rgba(255, 188, 11, .18); color: white; }
+  .portfolio-alerta:hover { box-shadow: 0 20px 40px rgba(255, 188, 11, .10); }
+  .portfolio-alerta .company-mark { background: #ffbc0b; color: #181818; }
+  .portfolio-alerta .chart-line { stroke: #ffbc0b; }
+  .portfolio-alerta .chart-point { fill: #ffbc0b; }
+  .company-mark { @apply grid h-10 w-10 place-items-center rounded-[8px]; }
+  .status-pill { @apply rounded-full px-2.5 py-1 text-[10px] font-semibold; }
+  .status-positive { @apply bg-success/10 text-success; }
+  .activity-dot { @apply mt-1 h-2 w-2 shrink-0 rounded-full ring-4; }
+  .activity-violet { background: #8b5cf6; box-shadow: 0 0 0 4px rgba(139,92,246,.1); }
+  .activity-blue { background: #1677ff; box-shadow: 0 0 0 4px rgba(22,119,255,.1); }
+  .activity-yellow { background: #ffbc0b; box-shadow: 0 0 0 4px rgba(255,188,11,.1); }
+
+  .chart-grid { stroke: currentColor; opacity: .08; stroke-width: .5; }
+  .chart-line { stroke: hsl(var(--primary)); }
+  .chart-point { fill: hsl(var(--primary)); stroke: white; stroke-width: 1; }
+  .chart-bar { background: linear-gradient(180deg, hsl(var(--primary-glow)), hsl(var(--primary))); }
+
+  .company-page {
+    --company-primary: 102 44 234;
+    --company-primary-2: 167 105 238;
+    --company-bg: 245 246 248;
+    --company-surface: 255 255 255;
+    --company-text: 16 8 40;
+    --company-muted: 105 102 120;
+    --company-border: 223 226 232;
+    --company-radius: 28px;
+    --company-small-radius: 10px;
+    background: rgb(var(--company-bg)); color: rgb(var(--company-text));
+    font-family: Manrope, "Oxanium", sans-serif;
+  }
+  .company-pomin { --company-primary: 15 95 168; --company-primary-2: 126 204 228; --company-bg: 247 250 252; --company-surface: 255 255 255; --company-text: 25 39 52; --company-muted: 104 123 137; --company-border: 220 229 235; --company-radius: 14px; --company-small-radius: 8px; background-image: radial-gradient(circle at 90% 4%, rgba(126,204,228,.14), transparent 27%); font-family: "Oxanium", sans-serif; }
+  .company-auditto { background-image: radial-gradient(circle at 90% 4%, rgba(102,44,234,.08), transparent 27%); }
+  .company-solutta { --company-primary: 0 66 255; --company-primary-2: 15 224 255; --company-bg: 248 249 253; --company-text: 8 8 80; --company-muted: 91 96 125; --company-border: 220 225 239; --company-radius: 5px; --company-small-radius: 5px; background-image: radial-gradient(circle at 90% 4%, rgba(15,224,255,.12), transparent 25%); font-family: "Oxanium", sans-serif; }
+  .company-alerta { --company-primary: 214 151 0; --company-primary-2: 255 188 11; --company-bg: 250 250 250; --company-surface: 255 255 255; --company-text: 24 24 24; --company-muted: 102 102 102; --company-border: 225 225 225; --company-radius: 5px; --company-small-radius: 5px; background-image: radial-gradient(circle at 92% 3%, rgba(255,188,11,.12), transparent 24%); font-family: "Oxanium", sans-serif; }
+  .dark .company-pomin { --company-primary: 126 204 228; --company-primary-2: 73 131 160; --company-bg: 5 14 23; --company-surface: 15 23 32; --company-text: 232 240 245; --company-muted: 142 163 176; --company-border: 37 54 66; }
+  .dark .company-auditto { --company-primary: 190 148 255; --company-primary-2: 167 105 238; --company-bg: 14 8 30; --company-surface: 24 14 47; --company-text: 251 244 255; --company-muted: 190 177 205; --company-border: 58 42 82; }
+  .dark .company-solutta { --company-primary: 15 224 255; --company-primary-2: 0 66 255; --company-bg: 8 8 48; --company-surface: 13 18 72; --company-text: 244 248 255; --company-muted: 171 188 219; --company-border: 39 55 116; }
+  .dark .company-alerta { --company-primary: 255 188 11; --company-primary-2: 255 214 92; --company-bg: 24 24 24; --company-surface: 34 34 34; --company-text: 255 255 255; --company-muted: 184 184 184; --company-border: 60 60 60; background-image: radial-gradient(circle at 92% 3%, rgba(255,188,11,.10), transparent 24%); }
+  .company-hero { background: linear-gradient(135deg, rgb(var(--company-text)) 0%, color-mix(in srgb, rgb(var(--company-primary)) 42%, rgb(var(--company-text))) 100%); color: white; }
+  .company-solutta .company-hero { background: linear-gradient(135deg, #080850 0%, #0027a8 58%, #0fe0ff 140%); }
+  .company-pomin .company-hero { background: linear-gradient(135deg, #050e17 0%, #102b3d 58%, #46758d 120%); }
+  .company-alerta .company-hero { background: linear-gradient(135deg, #181818 0%, #232323 68%, #5a4308 140%); }
+  .company-logo { @apply grid h-8 w-8 place-items-center text-sm font-bold; border-radius: var(--company-small-radius); background: linear-gradient(135deg, rgb(var(--company-primary)), rgb(var(--company-primary-2))); color: white; }
+  .company-alerta .company-logo { color: #181818; }
+  .company-card { border: 1px solid rgb(var(--company-border)); border-radius: var(--company-radius); background: rgb(var(--company-surface)); box-shadow: 0 10px 30px rgb(var(--company-primary) / .04); }
+  .company-stat { @apply p-5 transition-all duration-300 hover:-translate-y-0.5; }
+  .company-stat svg { color: rgb(var(--company-primary) / .75); }
+  .company-label { color: rgb(var(--company-muted)); @apply text-[9px] font-bold uppercase tracking-[0.14em]; }
+  .company-positive { color: rgb(var(--company-primary)); }
+  .company-button-primary, .company-button-secondary { @apply inline-flex h-10 items-center justify-center gap-2 px-4 text-xs font-semibold transition-all hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2; border-radius: var(--company-small-radius); }
+  .company-button-primary { background: linear-gradient(135deg, rgb(var(--company-primary)), rgb(var(--company-primary-2))); color: white; box-shadow: 0 8px 20px rgb(var(--company-primary) / .18); }
+  .company-alerta .company-button-primary { color: #181818; }
+  .company-button-secondary { border: 1px solid currentColor; background: rgba(255,255,255,.06); color: inherit; }
+  .company-card .company-button-secondary { border-color: rgb(var(--company-border)); }
+  .company-segment { @apply px-3 py-1.5 text-[10px] opacity-50; border-radius: var(--company-small-radius); }
+  .company-segment.active { background: rgb(var(--company-surface)); box-shadow: 0 2px 8px rgba(0,0,0,.08); color: rgb(var(--company-primary)); opacity: 1; }
+  .company-page .chart-bar { background: linear-gradient(180deg, rgb(var(--company-primary-2)), rgb(var(--company-primary))); }
+  .company-page .chart-line { stroke: rgb(var(--company-primary)); }
+  .company-page .chart-point { fill: rgb(var(--company-primary)); }
+  .progress-ring { width: 142px; height: 142px; padding: 12px; border-radius: 50%; background: conic-gradient(rgb(var(--company-primary)) var(--progress), rgb(var(--company-primary) / .10) 0); }
+  .progress-ring > div { @apply grid h-full w-full place-content-center rounded-full text-center; background: rgb(var(--company-surface)); }
+  .progress-ring strong { @apply text-2xl font-semibold; }
+  .progress-ring span { color: rgb(var(--company-muted)); @apply mt-1 block text-[9px] uppercase tracking-wider; }
+  .company-icon-button { @apply grid h-8 w-8 place-items-center transition-colors; border: 1px solid rgb(var(--company-border)); border-radius: var(--company-small-radius); }
+  .company-icon-button:hover { color: rgb(var(--company-primary)); }
+  .company-table { @apply w-full min-w-[680px] border-collapse text-left; }
+  .company-table th { color: rgb(var(--company-muted)); @apply px-6 py-3 text-[9px] font-bold uppercase tracking-wider; }
+  .company-table td { @apply border-t px-6 py-4 text-[11px]; border-color: rgb(var(--company-border)); }
+  .company-table tbody tr { @apply transition-colors; }
+  .company-table tbody tr:hover { background: rgb(var(--company-primary) / .035); }
+  .company-status { @apply inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[9px] font-semibold; }
+  .company-status.success { background: rgba(36,148,99,.10); color: #249463; }
+  .company-status.pending { background: rgb(var(--company-primary) / .10); color: rgb(var(--company-primary)); }
+  .company-link { color: rgb(var(--company-primary)); @apply inline-flex items-center gap-1 text-[11px] font-semibold; }
+}
+
+@media (min-width: 1536px) {
+  :root { --sb-open: 280px; --sb-closed: 72px; }
+}
+
+@media (min-width: 1920px) {
+  :root { --sb-open: 320px; --sb-closed: 80px; }
+}
+
