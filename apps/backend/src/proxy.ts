@@ -11,8 +11,11 @@ export function proxy(request: NextRequest): NextResponse {
   }
 
   const origin = request.headers.get("origin");
-  // Mesma origem (via proxy do Vite ou nginx) sempre passa; origens cruzadas só as da lista.
-  const originAllowed = !origin || getAllowedOrigins().includes(origin) || (URL.canParse(origin) && new URL(origin).host === request.headers.get("host"));
+  // Mesma origem (proxy do Vite, nginx ou rewrite da Vercel) sempre passa; origens cruzadas só as da lista.
+  // Atrás de proxy/rewrite o Host pode ser interno: o domínio público chega em x-forwarded-host.
+  const hostOrigem = URL.canParse(origin ?? "") ? new URL(origin!).host : null;
+  const hostsDoSite = [request.headers.get("host"), ...(request.headers.get("x-forwarded-host") ?? "").split(",").map((h) => h.trim())];
+  const originAllowed = !origin || getAllowedOrigins().includes(origin) || (!!hostOrigem && hostsDoSite.includes(hostOrigem));
 
   if (!originAllowed) {
     return NextResponse.json({

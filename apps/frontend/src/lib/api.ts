@@ -1,5 +1,6 @@
-// Vazio = mesma origem (proxy do Vite em dev, nginx em produção). Só defina para apontar a outro backend.
-const API_URL = import.meta.env.VITE_PIEGGI_API_URL?.replace(/\/$/, "") ?? "";
+// Produção (Vercel, nginx): a API está sempre na mesma origem do site, então a variável é ignorada — um valor
+// esquecido como http://localhost:3000 no painel derrubaria o login. Em dev, opcional para apontar a outro backend.
+const API_URL = import.meta.env.DEV ? (import.meta.env.VITE_PIEGGI_API_URL?.replace(/\/$/, "") ?? "") : "";
 
 /** fetch com mensagem clara quando o backend está fora do ar (o navegador só diz "Failed to fetch"). */
 async function requisitar(url: string, init?: RequestInit): Promise<Response> {
