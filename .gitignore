@@ -1,7 +1,10 @@
 node_modules/
+servico-fiscal/vendor/
+storage/
 .next/
 dist/
 coverage/
+tmp/
 .env
 .env.*
 !.env.example

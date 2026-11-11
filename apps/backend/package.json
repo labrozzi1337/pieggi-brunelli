@@ -7,19 +7,25 @@
     "build": "next build",
     "start": "next start --hostname 0.0.0.0 --port 3000",
     "typecheck": "tsc --noEmit --pretty false",
-    "db:types": "supabase gen types typescript --linked --schema start_back > src/integrations/supabase/database.types.ts"
+    "db:types": "supabase gen types typescript --linked --schema pieggi > src/integrations/supabase/database.types.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.117.2",
+    "docx": "^9.8.1",
+    "jszip": "^3.10.2",
     "next": "^16.3.8",
+    "pdf-lib": "^1.17.1",
+    "postgres": "^4.1.0",
+    "pptxgenjs": "^4.0.1",
+    "qrcode": "^1.5.4",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "zod": "^4.1.11"
   },
   "devDependencies": {
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.2",
     "supabase": "^2.119.0"
   }
 }
-

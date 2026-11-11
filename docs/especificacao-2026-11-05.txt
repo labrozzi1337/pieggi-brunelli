@@ -1,0 +1,1502 @@
+Operação de Eventos
+ N ov 5, 2026 · @ Bruno
+Este documento especifica o sistema que deve substituir os cinco agentes e planilhas que
+hoje operam a Pieggi: cardápio e preços, proposta, programação, comanda e plaquinha.
+Todas as regras aqui são as versões vigentes em 05/11/2026 -- onde uma regra nova
+revogou uma anterior, a antiga está marcada como revogada para o fornecedor não
+implementar a versão errada.
+1. Resumo executivo
+A Pieggi executa mais de 700 eventos por ano e cada evento gera quatro documentos
+obrigatórios -- proposta, programação, comanda e plaquinha -- todos derivados do
+mesmo cardápio e das mesmas regras de quantidade. Hoje esses documentos são
+produzidos manualmente, com as regras espalhadas em planilhas, PDFs e na cabeça de
+três pessoas. O sistema deve virar a fonte única dessas regras e gerar os quatro
+documentos a partir de um único cadastro de evento.
+O que o sistema faz, em uma frase: o usuário cadastra um evento (cliente, pax, horário,
+endereço, serviços contratados), o sistema calcula quantidades e preços aplicando as
+regras vigentes, e gera os quatro arquivos prontos para uso.
+O princípio inegociável
+As regras da Pieggi mudam toda semana. Só nos últimos 90 dias mudaram, entre outras
+coisas: o rodízio de sabor de suco da tarde, o roteamento de quiche grande entre
+Confeitaria e Cozinha Quente, a gramatura de proteína de almoço, a regra de petit four do
+Welcome e o preço de meia dúzia de itens avulsos.
+Por isso:
+     Nenhuma regra de negócio pode ficar escrita no código. Toda regra -- multiplicador,
+     gramatura, preço, roteamento, selo, tradução -- vive em tabela de banco, editável pelo
+     admin.
+     Toda regra tem data de vigência e histórico. Mudar uma regra hoje não pode alterar o
+     cálculo de um evento já fechado. O sistema sempre aplica a regra vigente na data do
+     evento.
+     Se a Pieggi precisar abrir chamado com o fornecedor para mudar um preço ou um
+     multiplicador, o projeto falhou. Esse é o critério de aceite mais importante do
+     contrato.
+Pieggi -- Especificação do Sistema de Operação de Eventos
+O que o sistema NÃO faz (fora de escopo)
+ERP contábil, financeiro, DRE, CRM e emissão de nota fiscal. O sistema exporta dados
+para esses sistemas, mas não os substitui. Compras, estoque e controle de freelancer
+estão dentro do escopo -- são os módulos 9 e 10.
+2. Arquitetura e escopo
+O sistema tem quatro camadas. O fornecedor deve entregar as quatro.
+Camada     O que é                                         Quem usa
+Banco de                                                   ninguém diretamente
+dados      Catálogo de itens, sabores, fichas técnicas,    sistema
+Motor de   tabelas de preço, clientes, regras, eventos
+regras                                                     comercial e operação
+           Aplica multiplicadores, gramaturas,             Bruno e quem ele
+Aplicação  roteamento, CMV, dedup -- toda a lógica de      autorizar
+           cálculo
+Admin
+           Telas de cadastro de evento, revisão de
+           cardápio, aprovação e download dos arquivos
+           Edição de preço, item, sabor, regra, cliente,
+           com vigência e histórico
+Fluxo do evento, ponta a ponta
+  1. Lead -- comercial cadastra cliente, contato, tipo de evento, pax, data, horário de início
+     e fim, endereço.
+  2. Proposta -- sistema sugere cardápio por linha contratada, calcula preço pela tabela
+     do cliente, valida CMV, gera o .pptx . Comercial ajusta e envia.
+  3. Fechamento -- proposta aprovada vira evento confirmado. O descritivo vendido fica
+     travado: é o que o cliente contratou.
+  4. Programação -- sistema explode o cardápio vendido em quantidades por serviço e
+     período, aplicando multiplicadores e regras de sabor. Gera o .docx operacional.
+  5. Comanda -- sistema roteia cada item da programação para sua estação (Cozinha
+     Quente, Cozinha Fria, Confeitaria) ou fornecedor externo, calcula pesos e materiais de
+     expedição. Gera o .docx de produção.
+  6. Plaquinha -- sistema extrai os itens servidos da programação, deduplica, traduz e
+     gera o .pdf de identificação em grade A4.
+Pieggi -- Especificação do Sistema de Operação de Eventos
+Dependência entre módulos
+A programação é derivada da proposta; a comanda e a plaquinha são derivadas da
+programação. Nenhum módulo a jusante pode inventar, trocar ou omitir item em relação
+ao de montante. Se a programação diz "pão de queijo integral", a comanda escreve
+integral, mesmo que a regra geral mande escrever multigrãos. O usuário pode
+sobrescrever manualmente, e a sobrescrita fica registrada com autor e horário.
+Stack
+Fica a critério do fornecedor, desde que: aplicação web responsiva (a operação consulta
+pelo celular), banco relacional, API REST documentada, e geração server-side de .pptx ,
+.docx e .pdf com fidelidade tipográfica ao template Pieggi. Não aceitamos geração de
+documento por template de terceiros que exija assinatura externa recorrente sem a
+Pieggi ter controle do layout.
+3. Modelo de dados
+O coração do sistema é o catálogo. Hoje ele vive na planilha
+Cardápio_Coffee_Break__Planilha_de_Custos.xlsx , aba "Produtos Pieggi", e nos três
+PDFs de cardápio (Coffee Break, Coquetel, Almoço/Jantar). Essa planilha é a fonte
+autoritativa para a carga inicial.
+Entidade          Campos essenciais
+Item
+                  nome oficial, categoria (bloco de cardápio), tier
+Sabor             mínimo
+Ficha técnica     (Basic/Standard/Executive/Master/Premium),
+Linha de serviço  estação de produção, fornecedor, unidade, custo,
+                  grafia oficial, tradução EN, tradução ES, selo
+                  dietético, recipiente/forminha, ativo/inativo, data
+                  de desativação
+                  item pai, nome, grafia oficial, tradução EN/ES, selo
+                  próprio, restrições de uso (manhã/tarde, período,
+                  cliente)
+                  item, rendimento, ingredientes, gramatura por
+                  unidade, modo de preparo (texto que sai na
+                  comanda)
+                  Coffee Break, Welcome Coffee, Brunch,
+                  Coquetel/HH, Almoço, Jantar, Auditório, Lunch Box,
+                  Item avulso
+Pieggi -- Especificação do Sistema de Operação de Eventos
+Entidade         Campos essenciais
+Pacote           linha + tier, itens fixos, nº de itens adicionais
+                 permitidos, regra de split
+Tabela de preço  nome (StartSe-Atual, StartSe-Negociação,
+                 Externos, WTC), vigência, preço por linha/tier/pax
+Cliente          razão social, contato, tabela de preço padrão,
+                 endereço fixo, marcas de bebida, regras próprias,
+                 isenções
+Evento           cliente, contratante, contato, nome do evento,
+                 data(s), horário início/fim, pax, endereço completo,
+                 serviços contratados, restrições alimentares
+Serviço do evento evento, linha, tier, período (manhã/tarde), horário,
+                             pax, reposição, itens e sabores escolhidos
+Regra            tipo, escopo (global / cliente / linha / item),
+                 expressão, data de vigência, autor, regra que
+                 revoga
+Campos de evento que o sistema nunca pode deduzir
+Três dados são de preenchimento obrigatório e sem valor padrão, porque errar neles já
+custou retrabalho e reclamação de cliente:
+     PAX exato -- tudo é calculado por pax; já houve erro de 90 contra 45.
+     Horário exato de início e fim -- define reposição no preço e na quantidade, períodos
+     de auditório e o split de sabor manhã/tarde; já houve reclamação de cliente por 9h
+     contra 8h30.
+     Endereço completo -- mesmo cliente recorrente muda sala, andar e unidade.
+Exceção: clientes de endereço fixo cadastrado (StartSe, Inteli, WTC) preenchem
+automaticamente, sem perguntar.
+4. Módulo 1 -- Catálogo e Precificação
+Este módulo é a base dos outros quatro. Ele guarda o cardápio, os preços e a regra de
+margem.
+Pieggi -- Especificação do Sistema de Operação de Eventos
+Hierarquia de tiers (cumulativa)
+Basic  Standard  Executive  Master. No Coquetel existe um quinto nível: Premium =
+Premium + Master + Executive + Standard + Basic. Um pacote de tier superior pode usar
+qualquer item dos tiers abaixo. Pedido de item acima do tier contratado tem que ser
+bloqueado e sinalizado ao comercial antes de gerar qualquer documento.
+Tabelas de preço
+Quatro tabelas: StartSe-Atual, StartSe-Negociação, Externos e WTC. A tabela é
+obrigatória antes de qualquer cálculo.
+Linha                                                      Externos        StartSe-Atual
+Coffee Break Executive                                     R$ 50/pax       R$ 44/pax
+Coffee Break Master                                        R$ 56/pax       R$ 50/pax
+Welcome Basic / Std / Exec / Master R$ 14 / 19 / 21 / 24 Exec R$ 18
+Auditório Executive 4h / 8h                                R$ 14 / R$ 19   R$ 12 / R$ 17
+Auditório Master 4h / 8h                                   R$ 25 / R$ 35   --
+Brunch Basic / Standard                                    R$ 95 / R$ 120  --
+Almoço e Jantar Executive / Master R$ 150 / R$ 215 --
+Acréscimo formato finger food                              + R$ 30/pax     --
+Coquetel Externos, sem cerveja/lata/long neck, em três faixas de duração: Basic 80/95/100
+· Standard 95/109/114 · Executive 115/130/135 · Master 130/145/150 · Premium 180/195/200.
+Taxas, logística e isenções
+     Logística R$ 250 fixo + 10% de taxa de serviço. A taxa de 10% incide só sobre
+     alimentação (pax × preço), nunca sobre logística.
+     Alphaville (Barueri): logística R$ 600, não R$ 250.
+     StartSe, Inteli, IPT e WTC são isentos de logística e taxa.
+     WTC tem repasse interno de 12% -- nunca aparece em slide de cliente.
+     Taxa de copeira: cobrar sempre que o evento não passar de R$ 3.500 por dia; regra só
+     vale para clientes externos.
+     Pedido mínimo: 20 pax. Evento menor cobra o mínimo de 20.
+     Louça premium: opcional de R$ 45/pax, aparece como opcional e não entra no total;
+     só para almoço e jantar, nunca em coquetel.
+Pieggi -- Especificação do Sistema de Operação de Eventos
+Reposição
+Multiplicadores sobre o preço: +30% = janela de 1h30 · +80% = +1h sobre a base · +150% =
++2h sobre a base (teto do coffee break). Coquetel: base 2h, +30% para 3h, +80% para 4h
+(teto). Inteli: +60% fixo, sempre. Acima do teto exige autorização de diretoria.
+CMV -- trava obrigatória
+     Alvo base ~20%. Aviso aos 30%. Bloqueio duro aos 33,3%.
+     Fórmula: Preço = Custo ÷ 0,30 , arredondado para cima no múltiplo de R$ 0,50.
+     Markup padrão 3×.
+     Piso de desconto: CMV 33,3% ÷ (1 - desconto%) .
+     Desconto máximo autorizado sem diretoria: 5%.
+     Imposto: 20% sobre venda de serviço; 8% quando faturado como NF de produto (bar
+     e bebidas).
+     Desvio de CMV nunca é absorvido em silêncio: fica registrado como decisão
+     comercial consciente, com autor e justificativa.
+     Princípio permanente: o preço do pacote tem que ser sempre mais econômico que a
+     soma dos itens avulsos equivalentes.
+Venda por unidade (item avulso)
+Pedido só de entrega, sem serviço, é precificado por unidade na planilha de custos --
+nunca pelo valor por pax da tabela. Para caber no budget do cliente, reduz-se quantidade,
+nunca o preço unitário.
+Item avulso                                                Preço
+Tábua de frios / tábua de queijos                          R$ 350,00 cada
+Pasta na tábua (catupiry, alho, mel e azeite)              R$ 210,00 a travessa
+Croissant de catupiry                                      R$ 5,00 un
+Tramezzino                                                 R$ 11,50 un
+Cone de frios (15 g de frios)                              R$ 9,50 un
+Doce vegano (brigadeiro, creme de banana com               R$ 9,50 un
+cacau)
+Sanduíche de frango cremoso sem glúten e sem               R$ 12,50 un
+lactose
+Salada de frutas, pote individual 100 g                    R$ 10,00 un
+Pieggi -- Especificação do Sistema de Operação de Eventos
+Item avulso                                                Preço
+Petit four                                                 R$ 200,00/kg, 10 g por unidade
+Suco individual em garrafinha                              R$ 14,90 un
+Água individual                                            R$ 5,00 un
+Coca-Cola lata                                             R$ 7,50 un
+Heineken lata                                              R$ 9,50 un
+Champanhe Casa Perini                                      R$ 95,00 a garrafa
+Suco na suqueira (5 L)                                     R$ 160,00 cheia
+Suco em garrafa Natural One (entrega)                      R$ 40,00 cada
+Bowl                                                       R$ 29,00 un
+Copeira (montagem e desmontagem)                           R$ 350,00
+Locação de louça na venda por unidade                      R$ 6,50 por convidado
+Regras de cálculo do avulso: café se vende por garrafa cheia de 1,5 L, nunca fracionado
+por litro -- volume que não fecha em garrafa inteira arredonda o cenário para cima (2 L
+pedidos = 2 garrafas = 3 L). Venda por unidade não cobra taxa de serviço: o orçamento
+resume numa linha única "Serviço" com o valor da copeira. Em serviço longo, vende-se um
+pacote padrão e projeta-se a reposição como venda de unidade solta, mas o orçamento
+cobra tudo numa linha só -- a quebra entre base e adicional fica interna.
+Lunch Box
+Kit individual em sacolinha preta com selo, em três versões. Composição: mini lanche +
+bebezinho + verrine + suco Pieggi 300 ml + guardanapo, mini colher e sacolinha.
+Versão  Preço
+Tradicional R$ 39,00
+Sem Glúten R$ 47,00
+Sem Lactose R$ 47,00
+5. Módulo 2 -- Proposta
+Gera o .pptx comercial que vai para o cliente.
+Pieggi -- Especificação do Sistema de Operação de Eventos
+Gates obrigatórios (o sistema não avança sem passar por todos)
+  1. Cliente e tabela -- definir se é StartSe, e qual das quatro tabelas se aplica. Nunca
+     misturar regra de StartSe com não-StartSe no mesmo evento.
+  2. Restrições alimentares -- existe? quais e quantas? pagas à parte ou cortesia? Se
+     houver, criar linha de restrição no orçamento.
+  3. Os três dados críticos -- pax exato, horário exato de início e fim, endereço completo.
+     Sem dedução, sem arredondamento, mesmo em cliente recorrente. O sistema só
+     pergunta o que ainda falta.
+  4. Validação de CMV -- rodar antes de gerar arquivo, não depois.
+  5. Resumo para aprovação -- mostrar pax, horário, endereço, cardápio e valores na tela
+     e exigir confirmação explícita antes de gerar o arquivo.
+Composição de cardápio
+     Todo período de coffee (manhã e tarde) exige 1 mini lanche vegetariano + 1 de proteína
+     animal -- contraponto obrigatório.
+     Manhã tem prioridade salgada; tarde tem prioridade doce.
+     Blanquet só de manhã. Frango cozido desfiado só de tarde.
+     Nunca repetir a mesma base de ingrediente entre manhã e tarde do mesmo dia. Em
+     evento de vários dias com a mesma turma, nunca repetir base entre dias.
+     Classificação: salgado = tem queijo ou pasta de queijo como base, mesmo combinado
+     com doce (tartelete queijo + goiabada é salgado). Doce = doce com doce, sem queijo.
+     Shot = categoria própria, não conta como salgado.
+     Shot vitaminado é sempre vegano (leite vegetal).
+     Sempre nomear sabor e item reais. Nunca genérico ("lanche com carne", "shot").
+     Nunca inventar item ou sabor fora do catálogo.
+Itens adicionais por linha
+Linha   Nº de adicionais Manhã                             Tarde
+Standard 1   1 salgado                                     1 doce
+Executive 2  1 salgado + 1 doce 2 doces
+Master  3    2 salgados + 1 doce 2 doces + 1 salgado
+Acima de ~50 pax, cada adicional se divide 50/50 entre duas variedades. De tarde, nunca
+wrap, salvo se estiver explícito no orçamento.
+Pieggi -- Especificação do Sistema de Operação de Eventos
+Orçamento (slide de valores)
+     Usar a redação exata do comercial. Nunca reescrever com nome de tier deduzido.
+     Bebida alcoólica (bar, vinho, taças) vai em bloco separado, nunca somada à
+     gastronomia.
+     Proposta com mais de uma opção: campo Total mostra "R$ a definir."
+     Nunca mostrar CMV, custo, lógica interna de preço ou repasse WTC em slide de
+     cliente.
+     StartSe: não colocar valor por pessoa nem nome de linha Pieggi (ex.: "Executive") --
+     só o nome do serviço como a StartSe descreveu (ex.: "Coffee III"), pax e total. Para
+     referência interna: "Coffee II" no descritivo equivale à linha Standard.
+     Celebrar: propostas não mostram quantidades.
+Estrutura do deck
+Sempre editar o template oficial Pieggi, nunca reconstruir do zero. Dois formatos:
+     Pocket (4 slides) -- capa, dados do evento, orçamento, contracapa. Para eventos sem
+     cardápio.
+     Completo (6+ slides) -- capa, institucionais, dados do evento (Cliente, Evento,
+     Contato, Pax, Data, Horário, Endereço), orçamento em tabela (Descritivo / PAX / Valor
+     + Total), um slide por serviço com o cardápio, contracapa.
+Nos slides de cardápio os itens aparecem como "Item -- N unidades" com a descrição logo
+abaixo. Bebidas entram como último bloco. Um pacote por slide de cardápio -- nunca
+duas colunas.
+Regras fixas por cliente
+Cliente Regra
+StartSe  Isento de logística e taxa · nunca incluir linha de
+         arranjo de flores · endereço fixo · bebidas Ambev
+         (Minalba, Pepsi normal e zero, Budweiser long
+         neck)
+Inteli   Isento de logística e taxa · restrição = cortesia 10
+         pax · endereço Av. Prof. Almeida Prado, 520 ·
+         contato Gabriel · reposição +60% fixo · pacote
+         Standard = itens fixos + exatamente 2 adicionais
+         divididos 50% não-vegano / 50% vegano
+Pieggi -- Especificação do Sistema de Operação de Eventos
+Cliente Regra
+WTC  Isento de logística e taxa · repasse interno de 12%
+     invisível ao cliente · o cardápio não pode ser
+     alterado -- o WTC revende esse cardápio; só é
+     permitido aumentar quantidade, nunca trocar item
+     ou sabor
+Demais Logística + 10% de taxa · bebidas Coca-Cola,
+              Heineken, água de qualquer marca
+6. Módulo 3 -- Programação
+Explode o cardápio vendido em quantidades por serviço e período e gera o .docx
+operacional que vai para as copeiras. É o módulo com mais regra numérica -- e o que mais
+muda.
+Multiplicadores de quantidade
+Caso                                                       Cálculo
+Coffee Break Standard / Executive / Master                 pax × 1,1
+(inclusive StartSe)
+Coffee Break Basic, mini lanche                            pax × 1,5
+Com reposição (todo alimento)                              base × 1,6 -- ou seja pax × 1,1 × 1,6
+Coffee com mais de 2h (com reposição)                      ×1,6 em cada item vendido, não só na base
+Item adicional                                             pax × 1,1
+Bebezinho / cup cake                                       pax × 1,1, arredondar para cima
+Bolo inteiro                                               pax ÷ 20 × 1,1, só com autorização expressa
+Doce em verrine (HH, coquetel, almoço)                     pax × 1,65, arredondar para cima, dividido
+                                                           entre 2 sabores (não 1,65 cada)
+Salada de frutas                                           100 ml × pax, em litros -- sem ×1,6, exceto
+                                                           Inteli com reposição
+Cerveja em coquetel                                        1,5 un/pessoa para 2h, proporcional acima
+                                                           disso
+Pão de queijo                                              1,5 tradicional + 0,5 integral por pessoa
+Pieggi -- Especificação do Sistema de Operação de Eventos
+Caso                                                       Cálculo
+Pão de queijo no Welcome                                   2/pax, 70% tradicional + 30% integral
+Mini lanche
+     Split: 80% carne (brioche comum) + 20% vegetariano (sempre brioche de cenoura).
+     Fixo 1 sabor carne + 1 vegetariano por período. Só adiciona +1 de cada a cada 100 pax
+     adicionais.
+     Nunca escrever "brioche integral" nem "Brioche CE" -- só "Brioche" e "Brioche de
+     cenoura".
+Bebezinho / cup cake
+     Sempre dividido em 2 sabores 50/50, mesmo abaixo de 30 pax.
+     Nunca 2 chocolates no mesmo período. Laranja é laranja puro, sem chocolate. Nunca
+     red velvet.
+     Sabores oficiais (10): Laranja & Chocolate, Churros, Cenoura & Chocolate, Chocolate
+     Duplo, Limão, Fubá & Goiabada, Ninho & Nutella, Prestígio, Nhá Benta, Maracujá. Só 4
+     são sem chocolate -- o sistema deve alertar quando um evento longo esgotar as
+     opções.
+     Master: bebezinho + queijadinha somam pax × 1,1, divididos 60% bebezinho + 30%
+     queijadinha.
+Welcome Coffee -- petit four
+     Sempre 1 sabor de petit four salgado (1 un/pax) + 2 sabores de petit four doce.
+     Nunca 2 salgados no Welcome, em qualquer pax -- a divisão de salgado acima de 60
+     pax não vale aqui.
+     Welcome com pão de queijo: salgado 1 un/pax + os 2 doces a 1 un/pax de cada (total
+     2/pax), substituindo o 0,5/pax de cada doce.
+     Grafia do salgado: só o nome simples -- gergelim, quinoa ou parmesão. Nunca
+     acrescentar descritor.
+     Doces: ferradura, serquilho, cristal de goiaba, unha de gato, dedo de moça, mentirinha.
+Wrap
+1 item, 1 sabor, quantidade = pax × 1,1 -- nunca dividir em 2 sabores. Sabores oficiais:
+Standard -- Cenoura & Ervas Finas, Tzatziki Pieggi. Executive e Master acrescentam
+Azeitonas & Agrião, Pepino Maçã & Hortelã, Uvas & Rúcula. Master exclusivo: Manga &
+Rúcula, Pasta de Ricota com Pesto. Nunca wrap de abacate.
+Pieggi -- Especificação do Sistema de Operação de Eventos
+Bebidas
+Caso                                                       Cálculo
+Café no coffee break
+Auditório contratado                                       100 ml × pax
+Auditório cortesia (brinde junto com                       café 150 ml × pax × períodos + 1,5 garrafa de
+coffee)                                                    água sem gás + 1 com gás por pax/período
+Conversão para garrafa térmica                             só café (150 ml × pax × períodos) + água na
+                                                           refresqueira (150 ml × pax × períodos) -- sem
+                                                           suco, sem chá, sem garrafa individual
+                                                           café 1,7 L por garrafa · suco e chá gelado 1 L por
+                                                           garrafa -- sempre arredondar para cima
+     Suco é sempre "Suco de laranja" por padrão. Outros sabores só a pedido do cliente.
+     Hortelã, gengibre, melancia e maracujá são sabores de shot funcional, não de suco.
+     Chá gelado: nunca especificar sabor -- só "chá gelado" ou "chá mate gelado".
+     Suco + chá mate gelado são dupla indivisível em todo Coffee Break. Se o cliente pedir
+     só suco, travar o job e escalar para a diretoria com justificativa de CMV.
+     Rodízio de suco da tarde em evento de 2+ dias: Dia 1 Laranja · Dia 2 Maracujá · Dia 3
+     Caju · Dia 4 Uva, e reinicia no Laranja. A manhã continua sempre Laranja.
+Tábuas de frios e queijos
+Tábua                                                      Composição
+Frios Standard                                             salame comum + copa + lombo canadense
+Frios Executive                                            6 g/pax -- presunto parma 40% + copa 30% +
+                                                           pastrami 30%
+Frios Master                                               copa + parma + pastrami
+Queijos Standard                                           gorgonzola + gruyère + parmesão
+Queijos Executive                                          6 g/pax -- provolone 50% + gruyère 30% +
+                                                           gorgonzola 20%
+Queijos Master                                             5 no favo de mel: parmesão, brie, gruyère,
+                                                           gorgonzola, muçarela de búfala
+Almoço/Jantar Master, ilha fria copa + parma + rosbife
+Pieggi -- Especificação do Sistema de Operação de Eventos
+Tábua                                                      Composição
+HH Pizza
+                                                           10 g/pax -- frios: parma 70% + pastrami 50% +
+                                                           copa 50% · queijos: gruyère 70% + provolone 50%
+                                                           + gorgonzola 50% -- arredondar para a dezena de
+                                                           grama
+Frutas da tábua: 1 de cada no evento inteiro -- 1 caixinha de uva, 1 caixinha de morango, 1
+toranja, 1 pitaya, 1 coco aberto. É só enfeite: não é para comer nem repor.
+Mesa de entrada (coquetel e jantar)
+  1. Guacamole em bowl médio; Doritos em travessa ao lado.
+  2. Homus em bowl médio; pão sírio em travessa forrada ao lado.
+  3. Coalhada dentro do repolho roxo (cavar o buraco); quibe em travessa ao lado.
+  4. Patês (tomate seco, azeitona) em bowls pequenos; torradas em cesta forrada ao lado.
+Pieggi Board e homus seguem sempre a montagem de referência: pasta no bowl
+centralizado no prato, pães em leque ao redor do bowl, dentro do prato.
+Almoço e jantar
+A programação sempre traz as quantidades calculadas. Nunca escrever "Chef decide" ou
+"Confeiteiro decide".
+Frutas laminadas entram só em almoço e jantar (Executive e Master) -- nunca em coffee,
+coquetel ou auditório. Salada de frutas vai sempre inteira ou em pedaços grandes; a
+equipe corta no local, porque pré-cortada vira água.
+Com 2 sobremesas e uma delas sendo pudim: pudim a 80 g/pax e a segunda sobremesa
+mantém 60 g/pax.
+Restrições alimentares
+Itens de restrição (vegano, sem glúten, sem lactose) aparecem como linhas inline dentro
+da tabela de cada serviço, no período correspondente -- nunca como bloco
+"RESTRIÇÕES" solto no fim do documento.
+Recipientes e forminhas
+O recipiente entra escrito no nome do item, na coluna RECEITA: carolina na forminha
+pétala de acrílico · quiche na forminha pétala kraft ou preta · tartelete de shimeji (CAN-
+005) na casquinha flor preta · mini queijadinha na forminha própria, tipo a do bebezinho.
+Pieggi -- Especificação do Sistema de Operação de Eventos
+Layout do documento
+     A4 (11906 × 16838 DXA), margens estreitas 720 DXA nos quatro lados, largura útil
+     10466 DXA.
+     Tabela única por serviço: QUANTIDADE | RECEITA | ITEM, larguras [1700, 6366, 2400].
+     Bloco de dados do evento [2900, 7566]. Sem subtítulos de subcategoria.
+     Cada serviço cabe inteiro em uma página ( cantSplit , keepNext , keepLines ; reduzir
+     fonte se preciso). Agrupar serviços que couberem juntos; só quebrar quando o
+     próximo não couber.
+     Cabeçalhos cinza #D9D9D9 com texto preto. Nunca fundo preto com letra branca.
+     Página 1, nesta ordem: bloco de dados do evento + CHECKLIST COPEIRAS + serviço
+     de Auditório.
+     Datas dentro do documento: DD/MM, sem dia da semana, sem ano.
+     Logo Pieggi no topo.
+     Nunca incluir folha de expedição na programação -- isso pertence à comanda.
+Checklist Copeiras (fixo, 12pt, sempre na página 1)
+(A) Montagem/entrega, por serviço -- "Fotografar cada mesa montada e enviar ao Luiz
+(WhatsApp) +55 11 97603-8194; faltando algo, avisar o Luiz", com um  por serviço:
+auditório montado com café e águas; coffee da manhã; almoço; coffee da tarde;
+refresqueiras de suco e chá abastecidas; acompanhamentos (açúcar, adoçante,
+achocolatado, sachê de chá).
+(B) Higienização e apresentação --  talheres, pratos, copos e louças sem mancha · 
+álcool 70% antes de expor ·  limpar bicos ·  verrines, doces e cupcakes limpos · 
+Nescau limpo e seco ·  escaldar garrafas.
+(C) Lavagem para ir embora --  retirar restos com papel toalha antes de lavar ·  não
+jogar alimento na pia do cliente.
+Endereços fixos (aplicar direto, nunca deduzir)
+Cliente Endereço
+StartSe  Av. das Nações Unidas, 12901 -- CENU Torre Norte,
+         9º andar, Cidade Monções, São Paulo/SP, 04578-
+         910. É o único endereço StartSe: não existe StartSe
+         WTC
+WTC      Av. das Nações Unidas, 12551 -- 6º andar, Brooklin
+         Novo, São Paulo/SP
+Pieggi -- Especificação do Sistema de Operação de Eventos
+Cliente Endereço
+Inteli Av. Prof. Almeida Prado, 520, São Paulo/SP
+Regras próprias do Inteli
++1 refresqueira de água extra por período de serviço · pão de queijo dividido em 30%
+tradicional + 30% multigrãos + 40% croissant de queijo/calabresa ou pão de batata com
+catupiry (nunca só tradicional + multigrãos) · Standard com reposição: a salada de frutas
+também recebe ×1,6.
+7. Módulo 4 -- Comanda
+Pega a programação pronta e roteia cada item para sua estação de produção ou
+fornecedor externo, calculando pesos, materiais e estrutura. Gera o .docx que vai para a
+cozinha e a expedição.
+Regra de fidelidade (a mais importante deste módulo)
+A comanda reproduz exatamente o que está escrito na programação -- é o que foi
+vendido ao cliente. O sistema não questiona, não substitui e não debate ingrediente,
+recheio, sabor ou quantidade contra o catálogo. Inclui todos os itens, nunca derruba
+nenhum. Corrige apenas erro óbvio de digitação (catuoiry  catupiry). Puxa complemento
+do catálogo somente quando a programação traz proteína ou base sem complemento;
+nunca sobrescreve complemento já escrito.
+Caso-exemplo: a programação diz "pão de queijo integral". A regra geral manda escrever
+multigrãos. A comanda escreve integral, porque está na programação.
+Estrutura de 6 páginas por dia de evento
+Página Conteúdo                                            Cor da borda  Responsável
+                                                                         cozinha
+1  Comanda de Produção --                                  Bordô         cozinha
+                                                           #800020       confeitaria
+   Cozinha Quente
+                                                           Terracota
+2  Comanda de Produção --                                  #B45309
+   Cozinha Fria / Garde Manger                             Azul #1F4E79
+3  Comanda de Produção --
+   Confeitaria
+4  Comanda de Expedição --                                 Cinza         Beatriz, coordenação Adriana
+                                                           #595959
+   Alimentação
+Pieggi -- Especificação do Sistema de Operação de Eventos
+Página Conteúdo                                            Cor da borda  Responsável
+5  Comanda de Expedição --                                 Cinza         Assistente de Expedição,
+                                                           #595959       coordenação Adriana
+   Bebidas, Estrutura e Materiais                                        Adriana
+                                                           Verde
+6  Locações Extras, Fornecedores                           #2E7D32
+   e Pessoal Freelancer
+Estação sem itens: a página some inteira. Cada setor começa em página própria. Evento
+de vários dias gera um único .docx com páginas de produção e expedição por dia, mas
+uma única página da Adriana cobrindo todos os dias -- nunca uma por dia; os
+fornecedores são rotulados por dia.
+Roteamento por estação
+Item                                                       Estação
+                                                           Confeitaria -- nunca Cozinha Quente
+Croissants e pão de batata (todos, inclusive
+recheados)                                                 Cozinha Quente
+Tortas salgadas grandes (frango com                        Confeitaria
+catupiry, palmito)                                         Confeitaria
+                                                           Confeitaria
+Quiches, inclusive a grande                                Cozinha Quente
+Petit four salgado                                         Confeitaria
+                                                           Confeitaria
+Tartelete, canapé e vol-au-vent doce
+                                                           Cozinha Fria
+Tartelete, canapé e vol-au-vent salgado
+assado                                                     Cozinha Fria / Garde Manger
+Verrines doces                                             Cozinha Fria
+Frutas da tábua, mix de castanhas e                        Nunca produção -- é congelado, aparece só
+amendoins, salada de frutas, laminadas                     em Expedição (Itens Comprados Prontos)
+Alecrim, manjericão, tomate grape, frios e
+queijos porcionados
+Pasta base, homus, guacamole, coalhada,
+patês, mini lanches, wraps, saladas
+Aioli de limão-siciliano (finalização da
+bolinha de queijo SQ-07A)
+Pão de queijo
+Pieggi -- Especificação do Sistema de Operação de Eventos
+Item                                                       Estação
+Bebidas térmicas (café, leite, água quente)
+                                                           Só Expedição (Bebidas) -- nunca em seção
+                                                           de cozinha
+Café: o padrão é a copeira passar no local, com o insumo saindo na Expedição­
+Alimentação. Só sai pronto da sede quando for explicitamente marcado como entrega
+pronta.
+Roteamento por fornecedor
+Item                                                       Fornecedor
+Frios de HH e almoço                                       Pad. Letícia
+Frios de coffee break                                      Mercado
+Queijos                                                    Sempre Mercado, nunca Letícia. A tábua de
+                                                           queijos não aparece na página da Adriana
+Pães de lanche                                             Padaria CPL
+Pães de HH e pães especiais (ciabatta,                     Pad. Letícia -- montados na Cozinha Fria
+baguel)
+Mini salgados fritos (coxinha, bolinha de                  Pad. Letícia por padrão; Salgaderia Leal só
+queijo, quibe frito)                                       por determinação expressa
+Salgadinhos veganos (risole de brócolis,                   POP VEGAN -- nunca Letícia
+coxinha de jaca verde)
+"Baguel" nos pães de HH é baguel mesmo, pão de fermentação natural da Letícia -- não é
+erro de digitação de baguete.
+Dimensionamento de almoço e jantar
+PAX de cálculo = PAX + 1 a cada 20 pax, mínimo +1, como folga para convidado a mais.
+Composição do cardápio                                     Proteína
+                                                           150 g/pax de cada proteína
+Completo (com massa e vegetariano)                         170 g/pax
+Intermediário (sem massa ou sem
+vegetariano)
+Pieggi -- Especificação do Sistema de Operação de Eventos
+Composição do cardápio                                     Proteína
+Reduzido (sem massa e sem vegetariano)
+                                                           200 g/pax -- até 10 pax, mínimo 1,5 kg de cada
+                                                           proteína pronta
+Item           Completo / Intermediário / Reduzido
+Arroz, feijão, purê 130 / 150 / 200 g por pax
+Massa          130 g/pax
+Vegetariano    100 g/pax
+Mix de folhas  80 g/pax
+Salada composta 60 g/pax
+Vegetais (Salada 3) 50 g/pax no total
+Sobremesas     60 g + 60 g por pax
+Sem acréscimo de 20% sobre esses valores.
+Molho: a proteína é sempre pesada sem molho, e o molho vai em linha própria com peso
+próprio. Molho de proteína = 30% do peso da proteína pronta. Molho de massa = 50% do
+peso da massa pronta. Não arredonda. Réchaud com fundo de molho, carne aparente,
+reposição aos poucos.
+Rendimentos oficiais: filé 0,80 · salmão 0,85 · peito de frango 0,80 · legumes 0,80 · folhas
+0,70 · purê de batata 0,70 · purê de mandioquinha 0,75 · arroz 1 kg  3 kg · massas secas ÷
+2,3 · nhoque e lasanha 1:1.
+A comanda mostra só peso pronto -- sem coluna nem menção de peso cru.
+Pesagem: em todo almoço e jantar, avisar a cozinha para pesar cada item pronto, anotar o
+peso na comanda e entregar a comanda na administração. Carne ao molho: pesar carne
+separada do molho. Nunca pesar sobra no evento -- a sobra fica para os funcionários.
+Amostra da Vigilância Sanitária: em todo almoço e jantar, a Cozinha Quente guarda na
+Pieggi, antes de sair, uma pequena porção de cada item quente, em saquinho com nome
+do item, evento, data e hora, congelada por 72 horas. Só itens quentes de almoço e jantar.
+Pudim: sempre 1 forma a cada 20 pax, arredondando para cima; avisar a Confeitaria dentro
+do item para dividir o peso total entre as formas.
+Sobremesas de almoço e jantar são sempre apresentadas como travessa × peso (ex.: "1
+travessa · 35 pax × 60 g = 2,1 kg"), nunca em unidades. Salada de frutas: sempre 100 g/pax,
+com o cálculo de peso visível.
+Pieggi -- Especificação do Sistema de Operação de Eventos
+Marmita da equipe Pieggi é à parte do buffet; o número varia de 1 a 5 pessoas -- a
+comanda deixa o campo em branco e o cozinheiro pergunta quantas são.
+Páginas de expedição
+     Tarja amarela de motorista: "MOTORISTAS: ANTES DE LEVAR, CHAMAR AS
+     RESPONSÁVEIS PARA VALIDAR".
+     Aviso vermelho no topo: "COPEIRAS: antes do início do evento -- TICAR TUDO,
+     FOTOGRAFAR e cobrar o Luiz no zap dele se faltou algo."
+     Duas colunas de tique em toda tabela de expedição: EXP  (na saída) e COPEIRAS 
+     (na chegada).
+     Campo amarelo obrigatório em todas as páginas menos a da Adriana: "DIA E
+     HORÁRIO DA SAÍDA: ______ (perguntar pra Adriana e anotar aqui)". Nunca calcular
+     nem pré-preencher esse campo, nunca omitir.
+     Seção âmbar "Itens Comprados Prontos": só o que é comprado pronto e vai à mesa
+     como está (pão de queijo congelado, nhoque, refrigerante, cerveja, iogurte, granola,
+     aveia, sucrilhos, mel, castanhas, água, quibe frito). Insumo de produção nunca aparece
+     em Expedição.
+     Bebidas em Expedição: quantidade sempre em litros; toda garrafa térmica leva a nota
+     "enviar limpa/escaldada"; comprados prontos somados por dia, não por serviço.
+Materiais por item (sublinhas ticáveis)
+Os materiais de cada item aparecem como sublinhas logo abaixo dele, não como bloco
+solto no rodapé.
+Item servido                                               Material
+Item solto em travessa
+                                                           1 pegador + 1 descanso por item/sabor (não
+Verrines e shots                                           por travessa, não por unidade)
+Lanches                                                    sem prato, sem pegador -- só colherinha de
+                                                           verrine, 1,2/pax
+Wraps
+Cup cakes / bebezinhos                                     sem travessa; pegador + descanso + 1 palito
+Acompanhamentos da salada de frutas                        por unidade
+(iogurte, granola, aveia, sucrilhos, mel)
+                                                           1 palito de wrap por unidade
+                                                           prato + garfo de bolo, sem pegador
+                                                           cada um em seu bowl com sua colher, como
+                                                           sublinhas ticáveis
+Pieggi -- Especificação do Sistema de Operação de Eventos
+Quantidades fixas: bandeja preta 2 por evento, sempre · bandeja acrílica só em HH e
+almoço/jantar finger · champanheira só em HH, almoço ou jantar · réchaud 1 a cada 2
+travessas ou panelas quentes · copo descartável para bebida quente 1,5/pax + mexedores
+· copo de vidro para suco e refri 1,1/pax · shot de vidro 1,1/pax (arredondar para cima) · gelo
+1 pacote de 3 kg a cada 25 pax quando houver bebida gelada · álcool 70% 1 L + 1 rolo de
+papel por evento.
+Bloco fixo "APOIO E IDENTIFICAÇÃO" (Estrutura)
+Toda comanda sai com este bloco, em qualquer evento, independente da programação: 1
+arranjo de flores · 1 extensão · 2 rádios comunicadores (enviar carregados) · 2 fones para
+rádio · 1 encadernado impresso da biblioteca Pieggi · 1 saquinho com a programação
+impressa + plaquinhas impressas · 1 bloco de etiquetas impressas com CLIENTE +
+EVENTO preenchidos · 5 caixas etiquetadas: LOUÇAS · PEGADORES E UTENSÍLIOS ·
+DESCARTÁVEIS · BEBIDAS · IDENTIFICAÇÃO E APOIO, cada uma com CLIENTE +
+EVENTO + nome da caixa + data.
+Equipamento próprio da Pieggi (nunca locar)
+Réchauds e placas são elétricos -- não usar gel combustível. A Pieggi tem taças de vinho,
+louças, copos e taças próprios para mesa posta. Refresqueira, champanheira, réchaud e
+caixa térmica são da Pieggi e vão em Estrutura, nunca em Locação Extra.
+Página da Adriana (verde, sem tarja de motorista)
+  1. LOCAÇÃO EXTRA -- só o que a Pieggi não tem e precisa alugar. Se não houver nada,
+     escrever "Não solicitado".
+  2. FORNECEDORES (comprados prontos) -- itens de Leal e Letícia com quantidades,
+     fundo âmbar, rotulados por dia em evento multi-dia. Nunca esquecer quibe frito,
+     tábuas de frios e pães de HH.
+  3. PESSOAL FREELANCER -- "Nº de freelancers contratados: ____" e a linha "Verba: R$
+     X.XXX,XX".
+Verba: é 8% do orçamento total do evento. O documento exibe somente "Verba: R$
+X.XXX,XX" -- nunca o orçamento total nem a explicação do cálculo. Verba zero: o bloco
+VERBA sai inteiro da página, sem sub-tarja e sem a linha "R$ 0,00".
+Pieggi -- Especificação do Sistema de Operação de Eventos
+Ponto fixo StartSe × demais clientes
+Regra                StartSe                               Demais (inclusive outro cliente
+                                                           no prédio WTC)
+Gelo                 não enviar
+Kit de limpeza       não enviar                            enviar
+Uniforme, luvas, toucas não enviar                         enviar (detergente, esponja,
+                                                           pano de chão, rodo, papel
+Forno elétrico para  não enviar -- a StartSe é o           toalha, álcool 70%)
+assar pão de queijo  único lugar que tem forno             enviar, dimensionado pelo nº de
+Caixas plásticas     5 obrigatórias                        freelancers da página da
+                                                           Adriana, não por pax
+Bebidas              só Ambev
+                                                           sempre enviar, sem perguntar
+                                                           5 obrigatórias
+                                                           Coca-Cola, Heineken, água de
+                                                           qualquer marca
+A regra de ponto fixo segue o CLIENTE, não o endereço. Evento de outro cliente no
+prédio do WTC (Av. das Nações Unidas, 12.551) é cliente externo: manda gelo, kit de
+limpeza, uniforme, extensão e transformador.
+A StartSe tem onde lavar: em serviço de auditório com reposição contínua, enviar um
+número físico menor de garrafas térmicas em rodízio (reabastecer e lavar no local), em vez
+da conversão integral de litros para térmicas. Equipamentos e louças podem ser
+reutilizados entre serviços e entre dias.
+Regras de item e de cliente
+     Croissant: recheio sempre 15 g por unidade, metade queijo e metade presunto.
+     Salgado com vários sabores: escolher 1 sabor único para a quantidade toda -- nunca
+     dividir nem combinar.
+     Mini cup salgado (homus e afins) = 60 ml por cup.
+     Carolina tradicional = recheio de doce de leite, não creme de confeiteiro. Escrever
+     "recheio de doce de leite" dentro do item na Confeitaria e na Expedição­Alimentação.
+     Chantilly padrão Pieggi: 1 L de CeSiBon bem gelado + 50 a 70 g de leite em pó integral,
+     batidos juntos -- nunca CeSiBon puro.
+     Creme de confeiteiro: sempre artesanal na cozinha (leite integral, gemas, açúcar,
+     amido de milho, baunilha) -- nunca pronto, em pó ou industrializado.
+Pieggi -- Especificação do Sistema de Operação de Eventos
+     Pasta base de lanche e wrap: ~20 g (1 scoop) por unidade. Receita: 2,5 kg de ricota + 1
+     kg de requeijão + 1 kg de muçarela = ~4,5 kg. Entra como linha própria, separada de
+     frios e pães.
+     Cup Samix de castanhas: sempre o padrão SAMIX, independente do que a
+     programação diga -- cup transparente de 50 ml, base de amendoim sem pele ~80%,
+     camada visível no topo com 1 castanha-do-pará + 1 caju + 2 amêndoas defumadas + 2
+     uvas-passas pretas + 2 brancas.
+     Wraps: discos de 10", 4 mini wraps por disco, 10 discos por pacote (~40 mini wraps).
+     Verrine Banoffee Desconstruída: finaliza com chantilly por cima, sem granulado
+     Melken.
+     "FINALIZAR CONFORME IMAGEM" em vermelho vai só em tartelete e verrine --
+     nunca em carolina, bebezinho e afins.
+     HH: mini hambúrguer é pré-cozido congelado; batata frita é pré-assada e finalizada
+     em air fryer no local.
+     Quibe: frito é comprado (Pad. Letícia); só o quibe assado seria produção de cozinha.
+     Petit fours: produção interna na Confeitaria, mesmo não estando no catálogo.
+     Banco Neon: mini doces sempre em forminha pétala azul de papel.
+     Zup: avisar a Cozinha Quente, em tarja vermelha, que nenhum molho pode ficar
+     picante.
+Shot vitaminado -- preparo obrigatório na comanda da Confeitaria
+Sempre que houver shot vitaminado, a comanda da Confeitaria traz o preparo dentro do
+item:
+     Shake fluido para beber, não pudim: bater leite vegetal + frutas do sabor um pouco
+     mais líquido.
+     1 colher de chá rasa de chia a cada 500 ml.
+     Hidratar 30 minutos na geladeira, nunca no forno, mexendo após 10 minutos. Nunca
+     fazer na hora.
+     Ajustar com leite vegetal até escorrer fácil da garrafa (banana e abacate engrossam
+     mais).
+     Teste de fluidez com a mistura já descansada e gelada: sai da garrafa continuamente,
+     sem sacudir.
+     Enviar separado: shake em garrafa com tampa, refrigerada, 1 por sabor + frutas
+     picadas em potes + mel em bisnaga. No evento as copeiras servem e finalizam em
+     shot de vidro (não verrine PIC), com as frutas em cima. Copo de 60 ml precisa deixar
+     espaço para a fruta.
+Pieggi -- Especificação do Sistema de Operação de Eventos
+Sabores: Energia Solar (manga + toque de gengibre; manga por cima) · Pele Bonita (mamão
++ laranja; mamão e laranja sem pele por cima) · Verde Força (pouco abacate + maçã verde;
+maçã verde picadinha por cima) · Pink Fresh (morango + manga; morango e manga por
+cima) · Banana Fit (base branca só de leite vegetal + chia; banana, chocolate em pó e mel
+somente por cima, na hora).
+Coffee com reforço
+Quando a programação vier marcada como "com reforço", ela já está dimensionada acima
+do PAX de propósito. A comanda copia as quantidades e não trata como erro.
+Formatação
+A4 (11906 × 16838 DXA), margens 720 DXA nos quatro lados · Arial 12pt no corpo (size 24
+no docx-js), tarjas e títulos proporcionalmente maiores · fundo de cabeçalho branco, cor
+só em borda e texto · espaçamento compacto, tabelas nunca quebram no meio · data sem
+dia da semana.
+8. Módulo 5 -- Plaquinha
+Transforma a programação em .pdf imprimível de plaquinhas trilíngues (PT/EN/ES) de
+identificação de item, em grade A4 2×3.
+Regra da dobra 50/50 (crítica)
+A célula é dividida exatamente ao meio na horizontal. A metade de cima é 100% branca --
+é a dobra, o apoio. Todo o conteúdo (tarja PIEGGI + símbolo PG + selos + título + subtítulo
++ EN/ES) ocupa só a metade de baixo, empurrado para baixo, com ~2,5 mm de padding da
+borda inferior.
+Parâmetros: FOLD_RATIO = 0.50 , CONTENT_RATIO = 0.50 . Nunca centralizar na célula
+inteira -- o centro da célula é a linha de dobra. O texto nunca cruza a linha do topo do logo
+nem os pontilhados de corte: ancora no topo do logo e desce.
+Disposição dentro da metade inferior: tarja PIEGGI no topo-esquerdo  selos à direita,
+alinhados pelo topo da tarja  símbolo PG abaixo da tarja  texto centralizado na área
+direita.
+Hierarquia do texto
+Para item de comida reconhecível de olho (mini lanche, tábua, cup cake, petit four,
+croissant, carolina, tapioca, pão de queijo, quiche, verrine, shot, canapé):
+     TÍTULO (grande) = o sabor ou especificador curto
+Pieggi -- Especificação do Sistema de Operação de Eventos
+SUBTÍTULO (menor) = a categoria/produto em caixa alta
+EN/ES sempre no formato CATEGORIA / sabor
+Exemplo         Título                                     Subtítulo  EN              ES
+                FRANGO
+Mini lanche     DEFUMADO                                   MINI       SANDWICH /      SÁNDWICH /
+de frango                                                  LANCHE     Smoked Chicken  Pollo Ahumado
+defumado        PARMESÃO,
+                GRUYÈRE E                                  TÁBUA DE   CHEESE BOARD /  TABLA DE
+Tábua de        GORGONZOLA                                 QUEIJOS    Parmesan,       QUESOS /
+queijos                                                               Gruyère &       Parmesano,
+                                                                      Gorgonzola      Gruyère y
+                                                                                      Gorgonzola
+Duas exceções invertem a ordem:
+ 1. Mini lanche vegetariano -- título é sempre VEGETARIANO , subtítulo é o recheio, com o
+     selo . EN/ES continuam trazendo SANDWICH / SÁNDWICH como categoria. Vale só
+     para o mini lanche vegetariano; nos demais itens vegetarianos o título continua sendo
+     o sabor.
+  2. Bebida de refresqueira ou térmica (café, leite, água quente, suco, chá, achocolatado)
+     -- categoria no título, sabor no subtítulo (ex.: SUCO / LARANJA).
+O subtítulo nunca traz a receita inteira, só o sabor ou a categoria. Nunca escrever
+"VEGETARIANO", "VEGANO", "salgado" ou "doce" no corpo do texto -- quem sinaliza é
+o selo. (A exceção 1 acima é o único caso em que a palavra VEGETARIANO aparece, e ela é
+o título.)
+Tipografia
+Elemento        Fonte                                                 Base Mínimo
+Título (sabor)  Helvetica-BoldOblique                                 18pt 13pt
+Subtítulo (categoria) Helvetica-BoldOblique                           10pt 9pt
+EN/ES           Helvetica-Oblique, cinza #555 8pt 8pt
+Sabor longo: quebrar em 2­3 linhas antes de reduzir a fonte; se ainda não couber no
+mínimo, encurtar a lista de sabores (ex.: "...e coco"). EN/ES sempre em 1 linha cada --
+comprimir EN/ES antes de mexer no título. "ACOMPANHAMENTOS" sai sempre escrito
+ADICIONAIS (cabe em 18pt cheio).
+Pieggi -- Especificação do Sistema de Operação de Eventos
+Selos
+Só existem dois por padrão:
+   Vegano -- sem nenhum ingrediente animal: sucos, chá gelado, salada de frutas,
+     frutas, guacamole, homus, batata frita, mix de castanhas, tapioca de banana e canela,
+   bolo vegano. Vegano já implica vegetariano, então usa-se só o selo vegano.
+     Vegetariano -- sem carne nem peixe, mas com laticínio ou ovo: pão de queijo, cup
+     cakes, petit fours, croissant de queijo, carolinas, quiches sem carne, tábua de queijos,
+     leite, achocolatado, mini lanches vegetarianos.
+     Sem selo -- itens com carne ou peixe (frango, peru, salame, pastrami, lombo, quibe,
+     hambúrguer, quiche lorraine, tábua de frios), e também café, água e água quente.
+Sem glúten, sem lactose e sem açúcar só entram quando a programação disser
+explicitamente. Nunca inferir.
+Itens que não geram plaquinha
+Produto com rótulo ou embalagem própria não leva plaquinha: água em garrafinha (com ou
+sem gás) · refrigerante em lata ou garrafa, nunca, inclusive Coca-Cola e Guaraná · cerveja ·
+vinho · molhos de marca (Heinz etc.) · frutas decorativas de tábua · sachês · açúcar e
+adoçante · mexedores · sachê de chá. Água servida na refresqueira ou jarra, sem rótulo,
+pode entrar se o cliente pedir identificação.
+Também não geram: água saborizada em refresqueira · croutons servidos à parte em mini
+bowl · auditório Basic e cortesias que não trazem item novo.
+Dedup e multi-dia
+Item idêntico aparece uma única vez no PDF do evento, mesmo servido em vários
+momentos -- vale para café, leite, água quente, suco, chá, achocolatado, pão de queijo,
+salada de frutas, adicionais e mix de castanhas. Itens com sabor diferente não são
+deduplicados. Em evento de vários dias: dedup dentro do mesmo dia, quebra de página
+entre dias.
+Agrupamentos
+Item                                                       Regra
+Pão de queijo
+                                                           tradicional + integral na mesma plaquinha --
+                                                            título TRADICIONAL E INTEGRAL, subtítulo
+                                                           PÃO DE QUEIJO . Nunca marcar sem
+                                                           glúten
+Pieggi -- Especificação do Sistema de Operação de Eventos
+Item                                                       Regra
+Petit four
+                                                           sabores do mesmo welcome coffee na
+Cup cake / bebezinho                                       mesma plaquinha, uma por dia; título com os
+Salada de frutas                                            sabores (2 linhas se preciso), subtítulo PETIT
+Verrine e shot                                             FOUR . Nunca "salgado/doce"
+Dip ou pasta + acompanhamento servidos
+juntos                                                     uma plaquinha por sabor, nunca agrupar.
+Proteína com molho à parte em molheira                      Título = sabor, subtítulo CUP CAKE (ou
+Salada em travessa exclusiva com vários                     se vegano). O nome é sempre "CUP
+componentes
+                                                           CAKE", nunca "bebezinho"
+                                                            sempre 2 cards: (1) SALADA DE FRUTAS ;
+                                                           (2) IOGURTE, GRANOLA, AVEIA,
+                                                           SUCRILHOS E MEL / subtítulo ADICIONAIS,
+                                                           sem selo
+                                                           individual, título = sabor; material do copo
+                                                           não aparece
+                                                           uma única plaquinha (coalhada + crudité,
+                                                           homus + pão sírio, patês + torradas). Os
+                                                           selos refletem o conjunto: se o
+                                                           acompanhamento tem glúten, não marcar
+                                                           sem glúten mesmo que o dip puro seja.
+                                                           Exceção: crudité é vegetal cru, então
+                                                           coalhada + crudité mantém sem glúten
+                                                           um card só, com o molho no título (ex.: FILÉ
+                                                           MIGNON COM MOLHO ROTI). O molho não
+                                                           ganha card próprio
+                                                            1 card só, com todos os componentes no
+                                                           título,
+Bebidas padrão
+PT                  EN                                     ES                  Selo
+CAFÉ / TRADICIONAL  COFFEE / Traditional
+LEITE / QUENTE      MILK / Hot                             CAFÉ / Tradicional  --
+ACHOCOLATADO / EM   CHOCOLATE MILK /
+PÓ                  Powdered                               LECHE / Caliente    
+                                                           ACHOCOLATADO / En   
+                                                           Polvo
+Pieggi -- Especificação do Sistema de Operação de Eventos
+PT                      EN                                 ES                  Selo
+ÁGUA QUENTE / PARA      HOT WATER / For Tea
+CHÁ                                                        AGUA CALIENTE / Para Té --
+SUCO / LARANJA          JUICE / Orange
+CHÁ / GELADO            TEA / Iced                         JUGO / Naranja      
+                                                           TÉ / Helado         
+Chá mate gelado usa o padrão CHÁ / GELADO, não "MATE GELADO". Chá gelado em
+refresqueira recebe plaquinha própria. Chás não recebem selo de sem açúcar por padrão.
+Par "Visite nosso site"
+Uma única vez por evento, no fim do PDF -- nunca repetir por turno, serviço ou conjunto.
+São sempre 2 plaquinhas idênticas. Bloco esquerdo: tarja PIEGGI em cima + símbolo PG
+grande embaixo, igual às normais. Bloco direito: "VISITE NOSSO SITE" no topo + QR code
+no meio + "pieggi.com.br" como subtítulo. Sem linhas EN/ES, tudo em preto, mesma regra
+de dobra 50/50. Quando a contagem de cards antes do par for ímpar, inserir 1 célula em
+branco antes do par para mantê-los na mesma linha.
+Glossário de tradução
+PT                  EN                                     ES
+                                                           SÁNDWICH
+MINI LANCHE         SANDWICH                               CUPCAKE
+                                                           PETIT FOUR
+CUP CAKE            CUPCAKE                                PAN DE QUESO
+                                                           CROISSANT
+PETIT FOUR          PETIT FOUR                             CAROLINA
+                                                           TABLA DE FIAMBRES
+PÃO DE QUEIJO       CHEESE BREAD                           TABLA DE QUESOS
+                                                           ENSALADA DE FRUTAS
+CROISSANT           CROISSANT                              TAPIOCA
+                                                           HUMUS
+CAROLINA            CREAM PUFF                             Zanahoria
+TÁBUA DE FRIOS      COLD CUTS
+TÁBUA DE QUEIJOS CHEESE BOARD
+SALADA DE FRUTAS FRUIT SALAD
+TAPIOCA             TAPIOCA
+HOMUS               HUMMUS
+Cenoura             Carrot
+Pieggi -- Especificação do Sistema de Operação de Eventos
+PT               EN                                        ES
+Limão
+Maracujá         Lemon                                     Limón
+Goiaba
+Frango           Passion Fruit                             Maracuyá
+Peru
+Presunto         Guava                                     Guayaba
+Frango defumado
+Lombo canadense  Chicken                                   Pollo
+                 Turkey                                    Pavo
+                 Ham                                       Jamón
+                 Smoked Chicken Pollo Ahumado
+                 Canadian Pork Loin Lomo Canadiense
+A tradução de cada item e sabor vive no cadastro, não no código: item novo entra com EN
+e ES preenchidos, e o sistema bloqueia a geração se faltar tradução.
+Grafia oficial e acentuação
+Petit four salgado: GERGELIM · QUINOA · PARMESÃO. Petit four doce: FERRADURA ·
+SERQUILHO · CRISTAL DE GOIABA · UNHA DE GATO · DEDO DE MOÇA · MENTIRINHA.
+Tábua de queijos: PARMESÃO · GRUYÈRE · GORGONZOLA · PROVOLONE · BRIE. Frutas
+da tábua: UVA · MORANGO · TORANJA · PITAYA · COCO · FIGO.
+Acentuação obrigatória: CAFÉ, CHÁ, PÃO DE QUEIJO, MAÇÃ, LIMÃO, MARACUJÁ,
+PRESTÍGIO, GRUYÈRE.
+Sabor que estiver na programação fora da grafia oficial fica como está na programação --
+exceto "Gergelim Preto", que vira GERGELIM.
+Decisões de item já fechadas
+ Mini lanche vegetariano "Búfala"  VEGETARIANO / BÚFALA · Barquete de tapioca
+ Banana & Mel  , mesmo com mel · Mini bombocado  título BOMBOCADO, sem
+ subtítulo, · Mini hambúrguer  título CHEESEBURGER, sem subtítulo · Mini lanche
+descrito como "X com queijo" (requeijão ou maionese + muçarela, sem pasta de queijo
+Pieggi)  título com "COM QUEIJO" (PEITO DE PERU COM QUEIJO) · Mini lanche
+vegetariano de manhã e tarde com os mesmos ingredientes  1 card por dia · Bolo inteiro
+ "Milho na Folha"  título MILHO, subtítulo BOLO · Salada Caesar  sem selo · Purê de
+batata sem lactose, com ficha explícita  + selo SEM LACTOSE.
+Pieggi -- Especificação do Sistema de Operação de Eventos
+Pipeline técnico de referência
+O sistema atual usa Python/ReportLab com Pillow, NumPy e qrcode. O QR é gerado em
+runtime apontando para https://pieggi.com.br . Assets e proporções: tarja 1260×420
+(branco sobre transparente, renderizada sobre retângulo preto), símbolo PG 700×672,
+selo vegetariano 616×644, selo vegano 588×588, QR 270×270. O fornecedor pode trocar a
+stack, desde que mantenha exatamente estas proporções e a regra de dobra.
+9. Módulo 6 -- Compras e Estoque
+Este módulo fecha o ciclo: a comanda já sabe o que vai ser produzido, então o sistema
+sabe exatamente o que precisa comprar. Hoje isso é feito por planilha e foto de nota fiscal.
+Cadastro de insumo
+Campo                                                      Observação
+Nome, marca, categoria/setor                               o cadastro é sempre agrupado por setor nas
+                                                           telas e relatórios
+Categorias                                                 mercearia/secos · frios e queijos · bebidas ·
+                                                           descartáveis · hortifruti · embalagem
+Unidade de compra × unidade de uso                         ex.: compra em caixa de 10 kg, usa em grama --
+                                                           com fator de conversão
+Fornecedores habilitados e preço de cada mais de um por insumo
+um
+Estoque mínimo                                             dispara alerta de reposição
+Perecível, validade e lote                                 controle de vencimento
+Vínculo com ficha técnica                                  quais itens de cardápio consomem este insumo
+Explosão de necessidade
+A partir da comanda de um evento (ou de vários eventos somados no mesmo dia), o
+sistema calcula:
+  1. Necessidade bruta = quantidade de cada item produzido × ficha técnica.
+  2. Necessidade corrigida = necessidade bruta ÷ rendimento do insumo. Os rendimentos
+     oficiais já estão no módulo 4 (filé 0,80 · salmão 0,85 · peito de frango 0,80 · legumes
+     0,80 · folhas 0,70 · purê de batata 0,70 · purê de mandioquinha 0,75 · arroz 1 kg  3 kg ·
+Pieggi -- Especificação do Sistema de Operação de Eventos
+     massas secas ÷ 2,3 · nhoque e lasanha 1:1). Comprar 150 g de proteína por pax sem
+     corrigir pelo rendimento é a causa clássica de faltar comida.
+  3. A comprar = necessidade corrigida - estoque disponível - o que já está em pedido de
+     compra em aberto.
+  4. Itens comprados prontos saem direto como pedido por fornecedor, usando o
+     roteamento já definido no módulo 4 (Pad. Letícia, Salgaderia Leal, Padaria CPL, POP
+     VEGAN, Mercado).
+O sistema consolida a necessidade de todos os eventos da semana num pedido só por
+fornecedor, não um pedido por evento.
+Cotação comparativa
+Fornecedores atuais por categoria: Valéria Buffet (secos/mercearia) · Central Frios e
+REV2 (frios e queijos) · Pad. Letícia, Salgaderia Leal, Padaria CPL e POP VEGAN (produção
+terceirizada) · hortifruti em definição (CEAGESP, distribuidores B2B, feiras).
+Requisitos da tela de cotação:
+     Comparar o mesmo insumo entre fornecedores na mesma unidade padronizada
+     (preço por kg, por litro, por unidade). Divergência de embalagem entre fornecedores é
+     hoje o principal erro de comparação e o sistema tem que normalizar automaticamente.
+     Mostrar prazo de pagamento e pedido mínimo de cada fornecedor ao lado do preço --
+     o mais barato com prazo pior nem sempre ganha.
+     Permitir compra dividida: o sistema deve suportar a prática atual de comprar secos
+     num fornecedor e frios em outro.
+     Registrar histórico de preço por insumo e fornecedor, com data.
+Entrada de estoque
+Entrada por nota: o usuário fotografa ou anexa a nota de mercado/fornecedor e lança os
+itens. O sistema deve aceitar lote de várias notas de uma vez e sugerir o insumo já
+cadastrado pelo nome que aparece na nota, aprendendo os apelidos de cada fornecedor.
+Cada entrada atualiza o custo médio ponderado do insumo.
+Baixa de estoque
+Baixa automática na expedição do evento: ao marcar a comanda como expedida, o sistema
+dá baixa do que saiu. Retorno de evento (sobra não consumida que volta) entra como
+devolução ao estoque, item a item.
+Pieggi -- Especificação do Sistema de Operação de Eventos
+Inventário
+Contagem periódica por setor, com tela de contagem que compara saldo do sistema ×
+contagem física e registra o ajuste com autor, data e justificativa. A divergência entre os
+dois é o indicador de perda que hoje não existe.
+O elo com o CMV (requisito crítico)
+O custo que alimenta o cálculo de CMV do módulo 1 deve vir do custo médio real do
+estoque, não de uma planilha estática. Quando o custo de um insumo sobe e empurra um
+item de cardápio para perto do teto de 33,3%, o sistema avisa o comercial antes da
+próxima proposta usar aquele item.
+Alertas obrigatórios
+     Insumo abaixo do estoque mínimo.
+     Item de cardápio sem ficha técnica ou sem insumo cadastrado -- hoje esses itens
+     são precificados por estimativa e carregam risco de custo real. O sistema deve marcá-
+     los e bloquear o fechamento da proposta até a cotação entrar.
+     Insumo com validade vencendo.
+     Preço de compra com variação acima de um percentual configurável em relação à
+     última compra.
+10. Módulo 7 -- Freelancers e diárias
+Hoje o controle é uma folha A4 impressa que fica na cozinha e é preenchida à mão. O
+sistema precisa substituí-la e produzir o fechamento de pagamento.
+Cadastro do freelancer
+Os campos vêm da folha que já está em uso: nome completo · CNPJ · celular/WhatsApp ·
+chave PIX. O sistema acrescenta: função (copeira, garçom, cozinheiro, auxiliar, motorista),
+valor de diária por função, data de cadastro, status ativo/inativo, documentos e histórico
+de eventos trabalhados.
+Cada freelancer tem um valor de diária próprio quando necessário -- o valor por função é
+o padrão, e o valor individual sobrescreve.
+Escala por evento
+Por evento e por dia: quem trabalha, em que função, horário de início e fim, local. A escala
+é lançada por quem contrata (hoje a Adriana), não calculada automaticamente pelo
+sistema -- o dimensionamento da equipe continua sendo decisão de pessoa.
+Pieggi -- Especificação do Sistema de Operação de Eventos
+A escala alimenta dois pontos já especificados:
+     A página da Adriana na comanda, no campo "Nº de freelancers contratados".
+     O dimensionamento de uniforme, luvas e toucas na Expedição, que é calculado pelo
+     número de freelancers, não por pax.
+Diárias e valores
+A faixa paga pela Pieggi é de R$ 180 a R$ 350 por diária, variando conforme a função, o
+serviço prestado e o tipo de contratado. O sistema nunca assume um valor único: o admin
+cadastra o valor padrão de cada função dentro dessa faixa, e o valor individual do
+freelancer sobrescreve o padrão quando existir. O valor fica congelado na diária no
+momento em que ela é lançada -- mudar a tabela depois não altera diária já lançada nem
+fechamento já pago.
+Atenção para não confundir com o preço de venda: a copeira cobrada do cliente a R$ 350 é
+receita, não custo. Os dois números convivem no sistema e nunca se misturam.
+Conceito                                                   Regra
+Diária cheia
+                                                           valor padrão da função, ou o valor individual do
+Evento de vários dias                                      freelancer
+Mesma pessoa em dois eventos no                            uma diária por dia trabalhado, lançada
+mesmo dia                                                  individualmente
+Verba do evento
+                                                           o sistema deve permitir e sinalizar, para decidir
+                                                           se paga uma ou duas
+                                                           8% do orçamento -- já calculada no módulo 4.
+                                                           O sistema mostra verba disponível × custo da
+                                                           escala lançada e alerta quando a escala
+                                                           estoura a verba
+O relatório de pagamento
+A saída principal deste módulo é a tabela que você pediu, filtrável por período (semana,
+quinzena, mês) e por evento:
+Freelancer CNPJ            Chave PIX                       Função Diárias Valor da            Total a    Status
+                                                                                      diária  pagar      Pendente
+exemplo  00.000.000/0001-  pix@exemplo Copeira 3           R$ 000,00                          R$ 000,00
+         00
+Pieggi -- Especificação do Sistema de Operação de Eventos
+Requisitos do relatório:
+     Totalizador geral do período e subtotal por função e por evento.
+     Detalhamento por linha: cada diária mostra evento, data e local, para o freelancer
+     conferir.
+     Status de pagamento por freelancer: pendente, pago, data do pagamento,
+     comprovante anexado.
+     Exportação em planilha e PDF, e geração do arquivo de pagamento em lote por PIX.
+     Fechamento travado: depois de marcado como pago, o período não aceita alteração
+     retroativa sem registro de quem alterou.
+Rateio por evento
+Cada diária fica vinculada ao evento que a gerou, para que o custo de mão de obra entre
+no custo real do evento -- e, por consequência, no CMV real, junto com o custo de insumo
+vindo do módulo 6. Sem isso, o CMV continua medindo só comida e escondendo o custo
+de operação, que foi exatamente o que derrubou a margem em eventos grandes no
+passado.
+11. Motor de regras -- o que tem que ser editável sem chamar o
+dev
+Esta seção é o requisito que separa um sistema que dura de um que vira legado em seis
+meses.
+Tudo isto é dado, não código
+Multiplicadores de quantidade · gramaturas por pax · rendimentos de insumo ·
+percentuais de reposição · tetos de CMV e de desconto · preços de todas as tabelas ·
+logística por região · taxa de serviço · pedido mínimo · composição de pacote por tier ·
+número de adicionais por linha · split de sabores · roteamento de item por estação ·
+roteamento de item por fornecedor · marcas de bebida por cliente · isenções por cliente ·
+selos de restrição · glossário de tradução · textos fixos (checklist copeiras, tarjas, bloco de
+apoio e identificação) · endereços fixos · listas de item proibido.
+Cada um desses valores mora em tabela, tem tela de edição no admin e aceita escopo:
+global, por cliente, por linha de serviço ou por item. O escopo mais específico vence o
+mais genérico.
+Pieggi -- Especificação do Sistema de Operação de Eventos
+Versionamento por data de vigência
+Toda regra tem data de início de vigência, autor e, quando substitui outra, a referência da
+regra revogada. O cálculo de um evento usa a regra vigente na data do evento, não a regra
+de hoje. Mudar a gramatura de proteína hoje não pode alterar a comanda de um evento da
+semana passada.
+O admin precisa de uma tela de histórico: "esta regra mudou em tal data, de tal valor para
+tal valor, por tal pessoa".
+Lista negra global de itens
+Itens que saíram do cardápio e não podem aparecer em proposta, programação,
+comanda ou plaquinha. Se aparecerem numa ficha antiga, o sistema pula e sinaliza:
+     Atum -- só quando o cliente pedir explicitamente; nunca em cardápio sugerido
+     Wrap de abacate -- umedece o pão
+     Bebezinho / cup cake red velvet
+     Risoto -- não existe no cardápio Pieggi
+     Tramezzino em proposta -- "não quero tramezino em nada"
+     "Coquetel Essencial" -- essa linha não existe; para opção simples de fim de ano, usar a
+     versão boteco
+     CAN-018 Mini Tortinha Folhada de Guacamole -- item extinto
+     Salgado caseiro frito (coxinha, risole, esfiha, bolinha de queijo) em proposta -- abaixo
+     do padrão Pieggi; o piso é tramezzino, pão de queijo, pão de batata, croissant, mini
+     pizza, quiche e verrine
+     Pão brioche integral -- descontinuado; substituir por pão de cenoura nos itens
+     vegetarianos
+     Fruta inteira (banana, maçã) em qualquer tier -- sempre salada de frutas
+     Tapioca (barquete) no cardápio do Coffee Master -- só se o cliente pedir
+     Pizza, pipoca gourmet, esfiha e estrogonofe em coquetel e festa -- a Pieggi trabalha
+     com ilhas de frios, tábuas, canapés e réchaud
+     Welcome Coffee vendido sozinho -- "não fazemos só welcome"
+Vocabulário travado
+O sistema nunca escreve: "cumbuca" (é travessa) · "bolo redondo" (é bolo inteiro) ·
+"bebezinho" na plaquinha (é cup cake) · "CE" em qualquer documento · "mini sanduíche
+de pão de forma" (é tramezzino) · dia da semana em qualquer documento · "Chef decide"
+ou "Confeiteiro decide" em programação.
+Pieggi -- Especificação do Sistema de Operação de Eventos
+Regras revogadas -- não implementar
+O fornecedor vai receber material histórico. Estas versões antigas não valem:
+Regra antiga                                               Vale hoje
+Salame espanhol nas tábuas                                 Copa no lugar, em todas as tábuas
+                                                           (30/09/2026)
+Rosbife nas tábuas de frios                                Pastrami -- rosbife só na ilha fria de
+                                                           almoço/jantar Master e em mini lanche
+Queijo prato no HH Standard                                Parmesão (30/09/2026)
+Atum como mini lanche da tarde                             Atum fora do cardápio sugerido
+                                                           (24/09/2026)
+Pão de queijo "Tradicional + Integral"                     Multigrãos é o mesmo que integral -- usar
+                                                           multigrãos (18/09/2026). Exceção: se a
+                                                           programação escrever "integral", a comanda
+                                                           escreve integral
+Carolina tradicional com creme de                          Doce de leite (24/09/2026)
+confeiteiro
+Tortas grandes  Confeitaria / quiche grande                Invertido: tortas salgadas grandes 
+ Cozinha Quente                                            Cozinha Quente · quiches, inclusive a
+                                                           grande  Confeitaria (20/10/2026)
+Bebezinho em 2 sabores só acima de 30 pax                  Sempre 2 sabores 50/50, em qualquer pax
+                                                           (07/2026)
+Bloco "RESTRIÇÕES" no fim da programação Restrições inline na tabela de cada serviço
+                                                                   (07/2026)
+Proteína de almoço a 800 g/pax com Prot                    Três níveis: 150 / 170 / 200 g/pax conforme a
+18%                                                        composição (05/10/2026)
+"Chef decide" / "Confeiteiro decide" em                    Peso calculado por item, sempre (20/10 e
+almoço e jantar                                            26/10/2026)
+Comanda com coluna de peso cru                             Só peso pronto (30/09/2026)
+Verba zero escrita como "R$ 0,00"                          O bloco VERBA sai inteiro da página
+                                                           (15/09/2026)
+Amostra da Vigilância congelada por 96 h                   72 horas -- confirmar com a Vigilância antes
+                                                           de travar
+Pieggi -- Especificação do Sistema de Operação de Eventos
+Regra antiga                                               Vale hoje
+Rodízio de suco da tarde em 7 dias                         Rodízio de 4: Laranja · Maracujá · Caju · Uva
+(cranberry, pêssego, tangerina, maçã verde)                (29/10/2026)
+Decoração de kiwi e morango na salada de                   Revogada
+frutas
+Shot vitaminado com base de chia firme                     Shake fluido, chia hidratada 30 min na
+                                                           geladeira (29/09/2026)
+Divisão de petit four salgado acima de 60                  No Welcome é sempre 1 salgado só
+pax aplicada ao Welcome                                    (16/10/2026)
+Encerramento do combinado Inteli em 01/09                  O combinado Inteli voltou a valer em
+                                                           09/10/2026
+Bloco "CHUBB / PROMPT OTIMIZADO" de                        Descartar inteiro -- é formato antigo
+comanda (3 comandas, US Letter, Arial 9pt,
+cabeçalho cinza sólido, café na cozinha,
+horário de saída calculado, sem página da
+Adriana)
+12. Geração de arquivos, nomenclatura e identidade
+Formato por documento
+Documento                Formato                           Observação
+Proposta                                                   o comercial troca fotos e exporta o PDF
+                         .pptx                             manualmente -- entregar o .pptx editável
+                                                           nunca Excel
+Programação              .docx                             nunca Excel
+Comanda                                                    pronto para impressão
+Plaquinha                .docx
+Lista de compras e
+pedido                   .pdf
+Relatório de freelancer
+                         .xlsx +
+                         PDF
+                         .xlsx +
+                         PDF
+Pieggi -- Especificação do Sistema de Operação de Eventos
+Nomenclatura (idêntica nos quatro tipos de documento de evento)
+Só o tipo muda, para que os quatro arquivos fiquem agrupados na mesma pasta:
+  Pieggi Proposta - {contratante} - {evento} - {contato} - {DD-MM-AAAA}.pptx
+  Pieggi Programacao - {contratante} - {evento} - {contato} - {DD-MM-AAAA}.docx
+  Pieggi Comanda - {contratante} - {evento} - {contato} - {DD-MM-AAAA}.docx
+  Pieggi Plaquinha - {contratante} - {evento} - {contato} - {DD-MM-AAAA}.pdf
+Data no nome do arquivo: DD-MM-AAAA , com traço e ano completo. Data dentro do
+documento: DD/MM/AAAA com barra, e na programação só DD/MM . Nunca dia da semana,
+em lugar nenhum.
+Identidade visual
+O logo é o selo redondo PIEGGI com monograma PG entrelaçado e o texto circular
+"CATERING · COFFEE & EVENTOS", preto sobre branco, no canto superior esquerdo do
+cabeçalho de cada página (~70×70 px). Nunca substituir por texto. A proposta usa a tarja
+PIEGGI branca sobre retângulo preto.
+Contato comercial que aparece no material: +55 11 94683-5321 ·
+atendimento@pieggi.com.br · pieggi.com.br.
+Qualidade tipográfica
+Os documentos são impressos e entregues a cliente, então o render não pode degradar
+fonte nem quebrar tabela. O fornecedor deve entregar, para cada tipo de documento, uma
+rotina de validação automática que: gera o arquivo, converte para PDF, rasteriza as
+páginas e confere que nada estourou a margem, que nenhuma tabela quebrou no meio e
+que a contagem de páginas bate com o esperado. Documento que falha na validação não
+chega ao usuário.
+13. Perfis, permissões e requisitos não funcionais
+Perfis
+Perfil     O que faz                                       O que não faz
+Diretoria
+           tudo, inclusive editar regra, preço --
+Comercial  e teto de CMV, e autorizar
+           exceção
+           cadastra lead e evento, monta                   não edita preço de tabela nem
+           proposta, gera .pptx                            estoura CMV sem autorização
+Pieggi -- Especificação do Sistema de Operação de Eventos
+Perfil               O que faz                             O que não faz
+Operação /                                                 não altera o descritivo vendido
+planejamento         gera programação e comanda,           não altera cardápio
+Logística (Adriana)  ajusta quantidade                     não gera documento
+Cozinha e            locação, fornecedores, escala de      não altera preço de venda
+expedição            freelancer, horário de saída          não altera escala
+Compras              consulta comanda, marca
+                     produção e tique de expedição,
+Financeiro           anota peso
+                     cotação, pedido, entrada de nota,
+                     inventário
+                     fechamento e baixa de
+                     pagamento de freelancer
+Toda alteração relevante -- preço, regra, quantidade de evento fechado, sobrescrita de
+cálculo -- fica em log com autor, data, valor antes e valor depois.
+Autorizações que o sistema tem que exigir
+Situação                                                   Quem autoriza
+CMV entre 30% e 33,3%                                      aviso visível, segue
+CMV acima de 33,3%                                         bloqueio, só diretoria libera
+Desconto acima de 5%                                       diretoria
+Preço fora de tabela                                       diretoria
+Exposição de coffee break acima de 3h (1h                  diretoria -- é limite de segurança alimentar,
+base + 2h de reposição)                                    não comercial
+Coquetel acima de 4h                                       diretoria
+Item de tier acima do contratado                           comercial, antes de gerar documento
+Item sazonal ou especial fora da planilha                  comercial
+oficial
+Não funcionais
+     Mobile primeiro na operação. Cozinha e copeira consultam pelo celular, muitas vezes
+     em local do cliente com internet ruim: as telas de consulta de comanda e checklist
+     precisam funcionar em tela pequena e tolerar conexão instável.
+Pieggi -- Especificação do Sistema de Operação de Eventos
+     Multiusuário simultâneo sem travar o mesmo evento.
+     Backup diário com restauração testada, e exportação integral dos dados em formato
+     aberto a qualquer momento. A Pieggi tem que poder sair do fornecedor levando o
+     banco.
+     API documentada para integrar depois com o ERP e o financeiro.
+     LGPD: o cadastro de freelancer guarda CNPJ, telefone e chave PIX -- dado pessoal.
+     Controle de acesso, criptografia em repouso e política de retenção são obrigatórios.
+     Ambiente de homologação separado do de produção, para testar mudança de regra
+     antes de valer para evento real.
+     Código-fonte e documentação entregues à Pieggi, com direito de contratar outro
+     fornecedor para manter.
+14. Fases de entrega
+A ordem não é negociável: cada fase depende da anterior. Construir a proposta antes do
+catálogo, ou a comanda antes da programação, produz um sistema que calcula errado e
+ninguém confia.
+Fase 1 -- Catálogo, regras e admin. Carga do cardápio a partir da planilha
+ Cardápio_Coffee_Break__Planilha_de_Custos.xlsx (aba "Produtos Pieggi") e dos três
+PDFs de cardápio. Cadastro de item, sabor, ficha técnica, tier, tabela de preço, cliente e
+regra. Admin com vigência e histórico. Nada aparece para o usuário final ainda. Critério de
+saída: o Bruno consegue mudar um preço e um multiplicador sozinho, pela tela.
+Fase 2 -- Evento e Programação. Cadastro de evento com os três dados críticos, motor de
+quantidade, geração do .docx de programação com checklist das copeiras. Critério de
+saída: uma programação real sai do sistema igual à que foi feita à mão.
+Fase 3 -- Comanda e Plaquinha. Roteamento por estação e fornecedor, dimensionamento
+de almoço e jantar, estrutura de 6 páginas, materiais de expedição; e o PDF de plaquinha
+com dobra 50/50 e tradução.
+Fase 4 -- Proposta. Gates, CMV, orçamento e .pptx . Vem depois porque depende do
+catálogo e dos preços estarem confiáveis, e porque é o documento que sai para cliente --
+o que mais custa se estiver errado.
+Fase 5 -- Compras e Estoque. Explosão de necessidade, cotação, pedido, entrada por
+nota, baixa e inventário. Fecha o elo do custo real com o CMV.
+Fase 6 -- Freelancers. Cadastro, escala, diárias e fechamento de pagamento.
+Pieggi -- Especificação do Sistema de Operação de Eventos
+O que o fornecedor deve cotar separado
+Migração da base histórica de eventos, treinamento das equipes e suporte mensal com
+SLA. E o custo de uma mudança de regra depois do aceite -- se vier caro, é sinal de que a
+fase 1 não foi feita como está especificada.
+15. Critérios de aceite
+O fornecedor só recebe o aceite de cada fase se o sistema reproduzir estes casos com os
+números exatos. Entregue esta seção junto com a proposta técnica.
+Caso 1 -- Coffee Break Executive, Externos, 50 pax, 1h, sem reposição
+Preço: 50 × R$ 50 = R$ 2.500 de alimentação · taxa de 10% sobre alimentação = R$ 250 ·
+logística R$ 250, sem taxa sobre ela · total R$ 3.000.
+Quantidades esperadas:
+Item           Resultado
+Mini lanche    55 un (50 × 1,1) -- 44 de carne em brioche + 11
+               vegetariano em brioche de cenoura
+Pão de queijo  100 un -- 75 tradicional + 25 integral
+Itens adicionais 2 (Executive), cada um com 55 un, cada um dividido
+                           50/50 em duas variedades: 28 + 27
+Cup cake       55 un, 2 sabores 50/50: 28 + 27, nunca dois com
+               chocolate
+Salada de frutas 5 L (100 ml × 50), sem ×1,6
+Café           5 L (100 ml × 50)  3 garrafas térmicas (5 ÷ 1,7 =
+               2,94, arredonda para cima)
+Bebidas        suco de laranja e chá mate gelado -- o sistema não
+               deixa remover o chá
+Erro que reprova: oferecer o suco sem o chá mate; cobrar os 10% sobre a logística; dividir
+o mini lanche vegetariano em mais de 1 sabor com 50 pax.
+Caso 2 -- Almoço Executive, 40 pax, cardápio completo, 2 proteínas
+PAX de cálculo = 42 (40 + 1 a cada 20).
+Pieggi -- Especificação do Sistema de Operação de Eventos
+Item               Peso pronto                             Compra corrigida pelo rendimento
+Cada proteína
+                   150 g × 42 = 6,3 kg                     peito de frango (0,80): 6,3 ÷ 0,80 = 7,875 kg
+Molho da proteína                                          cru
+Arroz
+Massa              30% de 6,3 = 1,89 kg linha própria, não arredonda
+Molho da massa
+                   130 g × 42 = 5,46 kg 1 kg cru  3 kg: 1,82 kg cru
+Vegetariano
+Mix de folhas      130 g × 42 = 5,46 kg massa seca ÷ 2,3: 2,374 kg
+Sobremesa (cada
+uma)               50% de 5,46 = 2,73
+                   kg
+                   100 g × 42 = 4,2 kg
+                   80 g × 42 = 3,36 kg folhas (0,70): 4,8 kg
+                   60 g × 42 = 2,52 kg apresentada como travessa × peso
+Também esperado: a comanda mostra só peso pronto, sem coluna de cru · a proteína é
+pesada sem molho · a Cozinha Quente recebe a instrução de guardar amostra de cada
+item quente, congelada 72 h · o campo de marmita da equipe fica em branco · o campo
+amarelo de horário de saída fica em branco.
+Se uma das sobremesas for pudim: pudim a 80 g × 42 = 3,36 kg, dividido em formas de 1 a
+cada 20 pax; a segunda sobremesa continua a 60 g.
+Erro que reprova: aplicar 150 g/pax num cardápio sem massa (seria 170 g) · somar o molho
+ao peso da proteína · mandar comprar 6,3 kg de frango sem corrigir pelo rendimento.
+Caso 3 -- Plaquinha de um coffee com café nos 3 momentos
+Entrada: café servido de manhã, no almoço e à tarde · pão de queijo tradicional e integral ·
+cup cake em 2 sabores · salada de frutas com acompanhamentos.
+Saída esperada: 6 cards -- 1 de café (deduplicado, não 3) · 1 de pão de queijo com título
+ TRADICIONAL E INTEGRAL e selo · 2 de cup cake, um por sabor · 2 de salada de frutas
+ (SALADA DE FRUTAS e IOGURTE, GRANOLA, AVEIA, SUCRILHOS E MEL /
+ADICIONAIS, sem selo). Mais o par "Visite nosso site", 2 plaquinhas idênticas, uma única
+vez, no fim.
+Em cada card: metade de cima 100% branca, conteúdo todo na metade de baixo, EN e ES
+em uma linha cada.
+Erro que reprova: três cards de café · um card só de salada de frutas · "bebezinho" escrito
+em vez de "cup cake" · conteúdo centralizado na célula inteira.
+Pieggi -- Especificação do Sistema de Operação de Eventos
+Caso 4 -- Fidelidade da comanda
+Entrada: programação com "pão de queijo integral" e com "catuoiry".
+Saída esperada: a comanda escreve integral (não troca para multigrãos) e corrige para
+catupiry.
+Caso 5 -- Travas comerciais
+Entrada                                                    Saída esperada
+Cardápio que resulta em CMV de 31% aviso visível, permite seguir
+CMV de 35%                                                 bloqueio, só diretoria libera, com registro da
+                                                           justificativa
+Desconto de 8%                                             bloqueio até autorização da diretoria
+Coffee break de 4h contínuas                               bloqueio por segurança alimentar, teto é 3h
+Evento de 12 pax                                           cobra o mínimo de 20 pax
+Evento em Alphaville                                       logística R$ 600, não R$ 250
+Caso 6 -- Regra de cliente
+Entrada                                                    Saída esperada
+Evento StartSe                                             sem logística, sem taxa, sem linha de flores,
+                                                           sem valor por pessoa no orçamento, endereço
+                                                           preenchido sozinho, bebidas
+                                                           Minalba/Pepsi/Budweiser, comanda sem gelo,
+                                                           sem kit de limpeza, sem uniforme e sem forno
+Evento de outro cliente no prédio do WTC                   tratado como externo: com gelo, kit de limpeza,
+                                                           uniforme, extensão, transformador e forno
+                                                           elétrico
+Tentativa de trocar um item do cardápio                    bloqueio -- só é permitido aumentar
+do WTC                                                     quantidade
+Evento Inteli                                              reposição +60% fixo, +1 refresqueira de água
+                                                           por período, pão de queijo 30/30/40
+Caso 7 -- Vigência de regra (o teste mais importante)
+  1. Gerar a comanda de um evento de uma data passada e guardar os números.
+Pieggi -- Especificação do Sistema de Operação de Eventos
+  2. No admin, mudar a gramatura de proteína do nível completo de 150 g para 160 g, com
+     vigência de hoje.
+  3. Regerar a comanda daquele mesmo evento passado.
+Esperado: os números não mudam. Um evento novo, com data de hoje, usa 160 g. Se a
+comanda antiga mudar, o versionamento não foi implementado e a fase 1 não passa.
+Caso 8 -- Freelancer e verba
+Evento de R$ 20.000  verba exibida = R$ 1.600 (8%), e o documento mostra só essa linha,
+nunca o orçamento total nem a conta.
+Escala lançada com 4 copeiras em 1 diária cada  o relatório traz 4 linhas com nome, CNPJ,
+chave PIX, função, 1 diária, valor e total, mais o total geral do período; e o sistema compara
+o custo da escala com a verba de R$ 1.600, alertando se estourar.
+Evento com verba zero  o bloco VERBA some inteiro da página da Adriana, sem a linha
+"R$ 0,00".
+16. Pendências a resolver antes de fechar o contrato
+Estas são lacunas e contradições que apareceram ao consolidar as regras. Nenhuma
+impede cotar o projeto, mas todas precisam de resposta antes da fase em que entram --
+se forem para o fornecedor em aberto, ele decide por conta e decide errado.
+Lacunas de regra
+Pendência                                                  Por que importa                            Fase
+Tabela de diária por função. A faixa paga o módulo 7 precisa do valor padrão de                       6
+é de R$ 180 a R$ 350, conforme função,                     cada função para calcular o total a pagar
+serviço e tipo de contratado. Falta fechar e para comparar o custo da escala com a
+quanto recebe cada função                                  verba
+Bebida recebe ×1,6 com reposição? A                        muda o número de garrafas térmicas de 2
+regra diz "todo alimento". Café, suco e                    todo evento com reposição
+chá ficam de fora ou entram?
+PAX de cálculo de almoço com número                                                                   3
+quebrado: 35 pax dá 1,75 -- arredonda
+para 2 (37) ou para 1 (36)?
+Pudim, 1 forma a cada 20 pax: usa o pax                                                               3
+real ou o pax de cálculo?
+Pieggi -- Especificação do Sistema de Operação de Eventos
+Pendência                                                  Por que importa                    Fase
+                                                                                              3
+Amostra da Vigilância: 72 h ou 96 h? As                    é exigência legal                  2
+duas aparecem no histórico. Vale                                                              2
+confirmar com a própria Vigilância
+Sanitária                                                                                     2
+Master: bebezinho 60% + queijadinha
+30% = 90%. Faltam 10% do total -- é erro
+de anotação ou tem um terceiro item?
+Queijos Standard: a composição
+registrada é gorgonzola + gruyère +
+provolone, mas a decisão de 30/09 trocou
+queijo prato por parmesão no HH
+Standard. Confirmar qual vale em coffee
+break
+Multiplicador de preço × multiplicador                     o dev vai tentar unificar os dois
+de quantidade: reposição de +2h cobra
++150% no preço mas multiplica a
+quantidade por 1,6 (+60%). Confirmar
+com o fornecedor que são dois números
+diferentes e isso é proposital
+Lacunas de dado
+     Fichas técnicas do Lunch Box Sem Glúten e Sem Lactose (pão e bolinho) não
+     existem. O produto já é vendido a R$ 47,00.
+     Tabelas StartSe-Negociação e WTC não estão consolidadas neste documento. Os
+     PDFs de preço são imagens sem camada de texto: vão precisar de digitação ou OCR
+     revisado na carga inicial. Isso é custo de migração e tem que estar na proposta do
+     fornecedor.
+     Cardápios MAIO2026 (Coquetel, Coffee Break, Almoço/Jantar) também são PDFs em
+     imagem. Mesmo problema.
+     Itens sem cadastro e sem cotação -- vários itens de proposta recente foram
+     precificados por estimativa. Precisam ser registrados e cotados antes da carga, senão
+     o CMV do sistema nasce errado.
+     Fornecedor de hortifruti ainda não está definido.
+Pieggi -- Especificação do Sistema de Operação de Eventos
+Decisões de estrutura
+     ERP do Gama: o sistema novo integra com ele ou substitui? Hoje o cadastro de item
+     novo passa pelo Gama. Se forem conviver, precisa de integração; se não, precisa de
+     plano de desligamento.
+     Padeco: confirmar se o pagamento de freelancer sai pela Padeco e se o sistema
+     precisa separar as duas entidades no relatório.
+     Quem edita regra além de você. Recomendo pelo menos duas pessoas com esse
+     acesso -- sistema com um único administrador para quando essa pessoa viaja.
+     Propriedade do código. Deixe explícito no contrato que o código-fonte, a
+     documentação e os dados são da Pieggi, e que a troca de fornecedor não exige
+     reescrever nada.
+17. Anexos que acompanham este documento
+O fornecedor não consegue começar só com a especificação. Estes arquivos precisam ir
+junto:
+Arquivo                                                    Para que serve                  Fase
+                                                                                           1
+Cardápio_Coffee_Break__Planilha_de_Custos.x                fonte autoritativa de item,
+                                                           categoria e custo para a carga  1
+lsx , aba "Produtos Pieggi"                                inicial
+Planilhas de custo de Cardápio HH e Cardápio               mesma função, outras linhas
+Almoço
+Os 3 PDFs de cardápio MAIO2026 (Coffee Break,              composição oficial de cada      1
+Coquetel, Almoço/Jantar)
+PDFs das tabelas de preço Externos, StartSe e              pacote por tier
+WTC
+                                                           preços que não estão            1
+Template oficial de proposta em .pptx
+                                                           consolidados neste
+Uma programação real em .docx
+                                                           documento
+Uma comanda real em .docx , de preferência de
+evento multi-dia                                           layout, fontes e identidade     4
+                                                           que o gerador tem que
+                                                           reproduzir
+                                                           referência de layout, colunas e 2
+                                                           checklist
+                                                           referência das 6 páginas,       3
+                                                           cores de borda e página da
+                                                           Adriana
+Pieggi -- Especificação do Sistema de Operação de Eventos
+Arquivo                                                    Para que serve               Fase
+Um PDF de plaquinhas já aprovado                                                        3
+                                                           referência da dobra 50/50 e
+Assets de marca: PIEGGI-SELO-01.png ,                      das proporções               1
+PIEGGILOGOBRANCO_2.png , PG_simbolo.png e os
+selos de restrição                                         sem eles nenhum documento
+Folha impressa de cadastro de freelancers                  sai no padrão
+Planilha de comparação de cotação de
+fornecedores                                               campos do módulo 7           6
+                                                           estrutura do módulo 6        5
+Um aviso sobre dois deles: os PDFs de cardápio e de preço são imagens, sem camada de
+texto. A digitação ou o OCR revisado desse conteúdo é trabalho real e tem que estar
+orçado na proposta do fornecedor, não presumido como de graça.

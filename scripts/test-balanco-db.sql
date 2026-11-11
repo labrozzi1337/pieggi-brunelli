@@ -1,0 +1,25 @@
+reset role;
+set request.jwt.claim.sub='10000000-0000-4000-8000-000000000001';
+do $$ declare eid uuid; pid uuid; r integer; caminho text; begin
+  insert into pieggi.eventos(id,empresa_id,cliente_id,titulo,liberacao_excepcional_motivo) values(gen_random_uuid(),'20000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000001','Balanço teste','Fixture') returning id into eid;
+  insert into pieggi.programacoes(evento_id,empresa_id,versao,status,saida_em,itens,alteracoes,criado_por) values(eid,'20000000-0000-4000-8000-000000000001',1,'APROVADA',now(),'[{"nome":"Caprese","quantidade":10,"unidade":"UN","setor":"COZINHA_FRIA","receita":"Completa"}]','Fixture balanço','10000000-0000-4000-8000-000000000001') returning id into pid;
+  update pieggi.eventos set etapa_operacao='EM_CAMPO' where id=eid returning revisao into r;
+  set role authenticated;
+  begin perform pieggi.salvar_balanco(eid,r,0,'[{"indice":0,"remanescentes":11,"retorno":0,"descarte":0}]','Teste','');raise exception 'TESTE: sobras maiores que produção';exception when raise_exception then if SQLERRM<>'Sobras e descarte devem caber na quantidade programada, respeitando a unidade.' then raise;end if;end;
+  perform pieggi.salvar_balanco(eid,r,0,'[{"indice":0,"remanescentes":2,"retorno":1,"descarte":1}]','Recebedor teste','Conferido');
+  select revisao into r from pieggi.eventos where id=eid;
+  reset role;
+  begin update pieggi.eventos set etapa_operacao='ENTREGUE' where id=eid;raise exception 'TESTE: entregou sem termo';exception when raise_exception then if SQLERRM<>'Anexe o termo assinado dos remanescentes desta revisão antes de encerrar.' then raise;end if;end;
+  set role authenticated;
+  caminho:=eid::text||'/termo.pdf';insert into storage.objects(bucket_id,name,owner_id,metadata) values('pieggi-evidencias',caminho,auth.uid()::text,'{"mimetype":"application/pdf"}');
+  perform pieggi.registrar_termo_remanescentes(eid,r,1,caminho,now());select revisao into r from pieggi.eventos where id=eid;
+  if not exists(select 1 from storage.objects where name=caminho) then raise exception 'TESTE: termo não pode ser baixado';end if;
+  perform pieggi.salvar_balanco(eid,r,1,'[{"indice":0,"remanescentes":3,"retorno":1,"descarte":1}]','Recebedor teste','Correção conferida');
+  reset role;
+  begin update pieggi.eventos set etapa_operacao='ENTREGUE' where id=eid;raise exception 'TESTE: termo antigo aceito';exception when raise_exception then if SQLERRM<>'Anexe o termo assinado dos remanescentes desta revisão antes de encerrar.' then raise;end if;end;
+  if (select count(*) from pieggi.remanescentes_termos where evento_id=eid)<>1 then raise exception 'TESTE: assinatura anterior apagada';end if;
+end $$;
+set role authenticated;
+set request.jwt.claim.sub='10000000-0000-4000-8000-000000000002';
+do $$ begin if exists(select 1 from pieggi.evento_balancos) then raise exception 'TESTE: cozinha acessa balanço';end if;end $$;
+reset role;

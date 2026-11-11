@@ -1,10 +1,10 @@
 import { createClient } from "@supabase/supabase-js";
 import type { ServerEnv } from "@/config/env";
 
-const DATABASE_SCHEMA = "start_back";
+const DATABASE_SCHEMA = "pieggi";
 
 export function createServerSupabaseClient(env: ServerEnv) {
-  return createClient(env.START_BACK_SUPABASE_URL, env.START_BACK_SUPABASE_SERVICE_ROLE_KEY, {
+  return createClient(env.PIEGGI_SUPABASE_URL, env.PIEGGI_SUPABASE_SERVICE_ROLE_KEY, {
     auth: {
       persistSession: false,
       autoRefreshToken: false,

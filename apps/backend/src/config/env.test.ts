@@ -10,8 +10,8 @@ afterEach(() => {
 describe("configuração do servidor", () => {
   it("rejeita credenciais ausentes", () => {
     process.env = { ...originalEnv };
-    delete process.env.START_BACK_SUPABASE_URL;
-    delete process.env.START_BACK_SUPABASE_SERVICE_ROLE_KEY;
+    delete process.env.PIEGGI_SUPABASE_URL;
+    delete process.env.PIEGGI_SUPABASE_SERVICE_ROLE_KEY;
 
     expect(getServerEnv().ok).toBe(false);
   });
@@ -19,7 +19,7 @@ describe("configuração do servidor", () => {
   it("normaliza a lista de origens", () => {
     process.env = {
       ...originalEnv,
-      START_BACK_ALLOWED_ORIGINS: "http://localhost:5173, https://app.example.com "
+      PIEGGI_ALLOWED_ORIGINS: "http://localhost:5173, https://app.example.com "
     };
 
     expect(getAllowedOrigins()).toEqual(["http://localhost:5173", "https://app.example.com"]);

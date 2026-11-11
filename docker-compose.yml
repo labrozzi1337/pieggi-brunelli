@@ -4,11 +4,20 @@ services:
       context: .
       dockerfile: apps/backend/Dockerfile
     environment:
-      START_BACK_SUPABASE_URL: ${START_BACK_SUPABASE_URL:-}
-      START_BACK_SUPABASE_SERVICE_ROLE_KEY: ${START_BACK_SUPABASE_SERVICE_ROLE_KEY:-}
-      START_BACK_ALLOWED_ORIGINS: ${START_BACK_ALLOWED_ORIGINS:-http://localhost:8080}
+      PIEGGI_SUPABASE_URL: ${PIEGGI_SUPABASE_URL:-}
+      PIEGGI_DATABASE_URL: ${PIEGGI_DATABASE_URL:-}
+      PIEGGI_CHAVE_CIFRAGEM_DADOS: ${PIEGGI_CHAVE_CIFRAGEM_DADOS:-}
+      PIEGGI_SUPABASE_PUBLISHABLE_KEY: ${PIEGGI_SUPABASE_PUBLISHABLE_KEY:-}
+      PIEGGI_SUPABASE_SERVICE_ROLE_KEY: ${PIEGGI_SUPABASE_SERVICE_ROLE_KEY:-}
+      PIEGGI_ALLOWED_ORIGINS: ${PIEGGI_ALLOWED_ORIGINS:-http://localhost:8080}
+      PIEGGI_SERVICO_FISCAL_URL: ${PIEGGI_SERVICO_FISCAL_URL:-http://servico-fiscal:8081}
+      PIEGGI_SERVICO_FISCAL_TOKEN: ${PIEGGI_SERVICO_FISCAL_TOKEN:-}
+      PIEGGI_ARMAZENAMENTO_FISCAL_DIR: /var/lib/pieggi/fiscal
+      PIEGGI_CHAVE_CIFRAGEM_FISCAL: ${PIEGGI_CHAVE_CIFRAGEM_FISCAL:-}
+      PIEGGI_PERMITIR_PRODUCAO_FISCAL: ${PIEGGI_PERMITIR_PRODUCAO_FISCAL:-NAO}
+    volumes:
+      - ./storage/fiscal:/var/lib/pieggi/fiscal
     restart: unless-stopped
-
   frontend:
     build:
       context: .
@@ -16,6 +25,16 @@ services:
     depends_on:
       - backend
     ports:
-      - "${START_BACK_APP_PORT:-8080}:80"
+      - "${PIEGGI_APP_PORT:-8080}:80"
+    restart: unless-stopped
+
+  servico-fiscal:
+    build:
+      context: .
+      dockerfile: servico-fiscal/Dockerfile
+    environment:
+      SERVICO_FISCAL_TOKEN: ${PIEGGI_SERVICO_FISCAL_TOKEN:-}
+    volumes:
+      - ./storage/fiscal:/var/lib/pieggi/fiscal
     restart: unless-stopped
 

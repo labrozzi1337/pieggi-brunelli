@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { getServerEnv } from "@/config/env";
-import { createServerSupabaseClient } from "@/integrations/supabase/server";
 import { log } from "@/lib/logger";
 import { checkDatabase } from "@/services/health-service";
 
@@ -23,7 +22,7 @@ export async function GET(request: Request): Promise<NextResponse> {
     }, { status: 503 });
   }
 
-  const database = await checkDatabase(createServerSupabaseClient(env.data));
+  const database = await checkDatabase();
 
   if (database === "unavailable") {
     log("error", "Não foi possível consultar o schema da aplicação.", {
@@ -44,10 +43,10 @@ function healthData(
   database: "connected" | "unconfigured" | "unavailable"
 ) {
   return {
-    service: "start-back-api" as const,
+    service: "pieggi-api" as const,
     status,
     database,
-    schema: "start_back" as const,
+    schema: "pieggi" as const,
     timestamp: new Date().toISOString()
   };
 }

@@ -1,13 +1,58 @@
 openapi: 3.1.0
 info:
-  title: Start Back API
+  title: Pieggi API
   version: 1.0.0
-  description: Contrato HTTP versionado do backend.
+  description: |
+    API com sessão HttpOnly e autorização por empresa/papel. Escritas operacionais
+    usam revisões otimistas e RPCs transacionais com RLS. Erros operacionais retornam
+    {error: {message}}; 409 exige atualizar a revisão antes de repetir, 503 indica
+    configuração/migration pendente. A fila de integrações não envia a provedores externos.
+security:
+  - sessionCookie: []
 servers:
   - url: http://localhost:3000/api/v1
 paths:
+  /auth/login:
+    post:
+      security: []
+      operationId: login
+      summary: Autentica um usuário previamente provisionado e grava cookies HttpOnly.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, senha]
+              properties:
+                email: { type: string, format: email }
+                senha: { type: string, format: password, minLength: 8 }
+      responses:
+        "200": { description: Sessão iniciada. }
+        "401": { description: Credenciais inválidas. }
+  /auth/session:
+    get:
+      operationId: getSession
+      summary: Retorna usuário, papéis e empresas da sessão ativa.
+      responses:
+        "200": { description: Sessão ativa. }
+        "401": { description: Sessão ausente ou expirada. }
+  /auth/refresh:
+    post:
+      operationId: refreshSession
+      summary: Renova os cookies da sessão.
+      responses:
+        "200": { description: Sessão renovada. }
+        "401": { description: Sessão não renovável. }
+  /auth/logout:
+    post:
+      operationId: logout
+      summary: Revoga e remove a sessão atual.
+      responses:
+        "200": { description: Sessão encerrada. }
   /health:
     get:
+      security: []
       operationId: getHealth
       summary: Verifica a API e a conexão com o schema dedicado.
       responses:
@@ -23,8 +68,572 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthResponse"
+  /fiscal/documentos:
+    get:
+      operationId: listarDocumentosFiscais
+      summary: Lista documentos de uma empresa fiscal.
+      parameters:
+        - { name: empresaId, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: pagina, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+      responses:
+        "200": { description: Documentos fiscais paginados. }
+    post:
+      operationId: criarDocumentoFiscal
+      summary: Cria uma NF-e modelo 55 em RASCUNHO e recalcula os totais no servidor.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DocumentoFiscalEntrada" }
+      responses:
+        "201": { description: Rascunho criado. }
+  /fiscal/produtos:
+    get:
+      operationId: listarProdutosFiscais
+      summary: Lista itens ativos do catalogo fiscal e informa pendencias de revisao.
+      parameters:
+        - { name: empresaId, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: busca, in: query, schema: { type: string, minLength: 1, maxLength: 100 } }
+      responses:
+        "200": { description: Produtos fiscais ativos. }
+  /fiscal/certificados:
+    post:
+      operationId: registrarCertificadoA1
+      summary: Vincula um A1 ja armazenado no diretorio fiscal privado e cifra a senha no backend.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [empresaId, nomeArquivo, senha]
+              properties:
+                empresaId: { type: string, format: uuid }
+                nomeArquivo: { type: string, pattern: '^[^\\/]+\\.(pfx|p12)$' }
+                senha: { type: string, writeOnly: true }
+      responses:
+        "201": { description: Metadado do certificado registrado. }
+  /fiscal/documentos/{id}:
+    get:
+      operationId: obterDocumentoFiscal
+      summary: Retorna o snapshot fiscal e seus itens.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: Documento fiscal. }
+  /fiscal/documentos/{id}/validar:
+    post:
+      operationId: validarDocumentoFiscal
+      summary: Executa validações de domínio e do motor fiscal.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: Checklist com erros, alertas e informações. }
+  /fiscal/documentos/{id}/gerar-xml:
+    post:
+      operationId: gerarXmlDocumentoFiscal
+      summary: Gera e arquiva XML não assinado no filesystem privado.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: XML gerado. }
+  /fiscal/documentos/{id}/emitir:
+    post:
+      operationId: emitirDocumentoFiscal
+      summary: Assina e transmite ao motor fiscal no ambiente do documento; ação fiscal real.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: Documento atualizado com o retorno real da SEFAZ; não garante autorização. }
+        "409": { description: Outra requisição alterou ou assumiu o documento; não repetir transmissão com retorno incerto. }
+        "422": { description: Pré-requisito fiscal pendente ou falha do motor fiscal. }
+  /fiscal/documentos/{id}/arquivos/{tipo}:
+    get:
+      summary: Download privado do XML autorizado ou DANFE PDF.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: tipo, in: path, required: true, schema: { type: string, enum: [xml, pdf] } }
+      responses:
+        "200": { description: Arquivo binário com Content-Disposition attachment. }
+        "404": { description: Arquivo ainda indisponível. }
+  /eventos:
+    get:
+      summary: Eventos e estados dos cinco artefatos da versão vigente, com dados filtrados por papel.
+      parameters:
+        - { $ref: '#/components/parameters/Empresa' }
+        - { name: historico, in: query, schema: { type: string, enum: ["1"] }, description: 'Inclui encerrados (entregues/perdidos) há mais de 90 dias; sem ele, só os em aberto e os recentes.' }
+      responses:
+        "200": { description: Lista em data; dados comerciais restritos por RLS. }
+    post:
+      summary: Cria cliente/evento atomicamente; novo evento inicia em Frio, com operação bloqueada.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EventoEntrada' }
+      responses:
+        "201": { description: Evento e cliente persistidos com auditoria. }
+  /eventos/{id}:
+    patch:
+      summary: Edita evento/cliente; alteração relevante invalida programação e seus derivados.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - { $ref: '#/components/schemas/EventoEntrada' }
+                - { type: object, required: [atualizadoEm], properties: { atualizadoEm: { type: string, format: date-time } } }
+      responses:
+        "200": { description: Evento atualizado. }
+        "409": { description: Revisão antiga, mudança após saída ou contrato obrigatório. }
+  /eventos/{id}/operacao:
+    post:
+      summary: Comando operacional auditado; assinatura e valores não são aceitos aqui.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [revisao, comando]
+              properties:
+                revisao: { type: integer, minimum: 1 }
+                comando:
+                  type: object
+                  required: [acao, dados]
+                  properties:
+                    acao: { type: string, enum: [PROGRAMACAO_SALVAR, PROGRAMACAO_APROVAR, TAREFA_ATUALIZAR, EXPEDIR, ENTREGAR, TITULO_CRIAR, TITULO_RECEBER, POS_VENDA] }
+                    dados: { type: object, description: 'Payload estrito por ação em dominios/operacao/http.ts. PROGRAMACAO_SALVAR requer saidaEm, alteracoes, itens e roteiroCampo; rotulos são opcionais.' }
+      responses:
+        "200": { description: Comando confirmado e auditado no mesmo commit. }
+        "409": { description: Conflito de revisão ou pré-requisito incompleto. }
+  /operacao:
+    get:
+      summary: Central de operação por empresa (uma consulta); valores/custos somente para perfis autorizados.
+      parameters:
+        - { $ref: '#/components/parameters/Empresa' }
+        - { name: evento, in: query, schema: { type: string, format: uuid }, description: 'Inclui este evento mesmo fora da janela (aberto por link).' }
+        - { name: desde, in: query, schema: { type: string, format: date }, description: 'Amplia a janela de entregues (padrão: últimos 60 dias) até esta data.' }
+      responses:
+        "200": { description: Eventos, programas, tarefas, roteiro, notificações, títulos, custos e fila permitidos pelo papel. }
+  /operacao/producao:
+    get:
+      summary: Programações aprovadas de hoje/amanhã em São Paulo, sem preços.
+      parameters:
+        - { $ref: '#/components/parameters/Empresa' }
+      responses:
+        "200": { description: Itens ordenados por saída; versões antigas não podem ser executadas. }
+  /operacao/documentos:
+    get:
+      summary: Gera/download Word ou PDF da versão aprovada vigente, registrando SHA-256.
+      parameters:
+        - { name: programacaoId, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: tipo, in: query, required: true, schema: { type: string, enum: [PROGRAMACAO, COMANDA, PLAQUINHAS] } }
+        - { name: setor, in: query, schema: { type: string, enum: [COZINHA_QUENTE, COZINHA_FRIA, CONFEITARIA, BEBIDAS, ESTRUTURA, FORNECEDOR] } }
+      responses:
+        "200": { description: DOCX ou PDF com versão; COMANDA exige setor. }
+        "409": { description: Versão invalidada ou plaquinhas com classificação/texto pendente. }
+  /operacao/contratos:
+    get:
+      summary: Download do PDF assinado privado registrado para o evento.
+      parameters:
+        - { $ref: '#/components/parameters/Evento' }
+      responses:
+        "200": { description: PDF com Content-Disposition attachment. }
+    post:
+      summary: Registra PDF já assinado; não efetua assinatura eletrônica.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema: { $ref: '#/components/schemas/PdfAssinado' }
+      responses:
+        "200": { description: Contrato registrado; evento liberado conforme as regras. }
+  /operacao/evidencias:
+    get:
+      summary: Download privado de foto de tarefa.
+      parameters:
+        - { name: tarefaId, in: query, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: JPEG, PNG ou WebP privado. }
+    post:
+      summary: Anexa foto obrigatória e confirma tarefa sob revisão/ordem transacional.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema: { $ref: '#/components/schemas/FotoTarefa' }
+      responses:
+        "200": { description: Evidência e tarefa confirmadas. }
+  /operacao/agenda:
+    get:
+      summary: Exporta evento para ICS; não sincroniza agenda externa.
+      parameters:
+        - { $ref: '#/components/parameters/Evento' }
+      responses:
+        "200": { description: text/calendar para download. }
+  /operacao/campo:
+    get:
+      summary: Consulta links de campo sem revelar tokens já emitidos.
+      parameters:
+        - { $ref: '#/components/parameters/Evento' }
+      responses:
+        "200": { description: Responsáveis, validade e revogação. }
+    post:
+      summary: ADMIN/EXPEDICAO_COMPRAS cria link restrito ao dia do evento ou revoga link existente.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [eventoId]
+              properties:
+                eventoId: { type: string, format: uuid }
+                responsavel: { type: string, minLength: 2, maxLength: 100 }
+                revogarId: { type: string, format: uuid }
+      responses:
+        "200": { description: Novo token retornado uma única vez ou revogação confirmada. }
+  /campo:
+    parameters:
+      - { name: X-Pieggi-Campo, in: header, required: true, schema: { type: string, pattern: '^[A-Za-z0-9_-]{43}$' } }
+    get:
+      security: []
+      summary: Consulta apenas o evento, roteiro e tarefas do link de campo, sem preços ou edição da programação.
+      responses:
+        "200": { description: Dados mínimos do evento autorizado. }
+        "403": { description: Link inválido, expirado, revogado ou fora do dia do evento. }
+    patch:
+      security: []
+      summary: Confirma execução da próxima etapa, com horário real do servidor e observação opcional.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [etapaId, revisao, observacao]
+              properties:
+                etapaId: { type: string, format: uuid }
+                revisao: { type: integer, minimum: 1 }
+                observacao: { type: string, maxLength: 1000 }
+      responses:
+        "200": { description: Execução confirmada; repetir a mesma etapa não duplica auditoria. }
+        "409": { description: Foto/etapa anterior pendente, versão invalidada ou revisão antiga. }
+    post:
+      security: []
+      summary: Confirma uma das quatro fotos obrigatórias de campo na ordem aprovada.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema: { $ref: '#/components/schemas/FotoTarefa' }
+      responses:
+        "200": { description: Foto privada associada ao evento e acesso. }
+  /operacao/balanco:
+    get:
+      summary: Consulta balanço/termos ou baixa termo DOCX/PDF assinado.
+      parameters:
+        - { $ref: '#/components/parameters/Evento' }
+        - { name: documento, in: query, schema: { type: string, enum: [termo, assinado] } }
+        - { name: termoId, in: query, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: JSON, Word para assinatura ou PDF privado conforme documento. }
+    post:
+      summary: Confirma balanço físico ou anexa termo assinado da revisão corrente.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [eventoId, revisao, balancoRevisao, linhas, recebedor, observacoes]
+              properties:
+                eventoId: { type: string, format: uuid }
+                revisao: { type: integer, minimum: 1 }
+                balancoRevisao: { type: integer, minimum: 0 }
+                recebedor: { type: string, maxLength: 200 }
+                observacoes: { type: string, maxLength: 3000 }
+                linhas:
+                  type: array
+                  items:
+                    type: object
+                    required: [indice, remanescentes, retorno, descarte]
+                    properties:
+                      indice: { type: integer, minimum: 0 }
+                      remanescentes: { type: number, minimum: 0 }
+                      retorno: { type: number, minimum: 0 }
+                      descarte: { type: number, minimum: 0 }
+          multipart/form-data:
+            schema:
+              allOf:
+                - { $ref: '#/components/schemas/PdfAssinado' }
+                - { type: object, required: [balancoRevisao], properties: { balancoRevisao: { type: integer, minimum: 1 } } }
+      responses:
+        "200": { description: Registro auditado; soma física não pode exceder o programado. }
+  /operacao/financeiro:
+    get:
+      summary: Custos realizados manuais para papéis autorizados; não é pagamento ou conciliação automática.
+      parameters:
+        - { $ref: '#/components/parameters/Empresa' }
+      responses:
+        "200": { description: Custos e cancelamentos preservados. }
+    post:
+      summary: ADMIN/FINANCEIRO altera valores ou lança/cancela custo auditado.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - { $ref: '#/components/schemas/ComandoEvento' }
+              description: 'comando.acao: VALORES_SALVAR (venda/custoEstimado), CUSTO_CRIAR (categoria/descricao/valor/competencia/referencia/idempotencia), CUSTO_CANCELAR (id/motivo). Valores em centavos exatos; idempotencia UUID.'
+      responses:
+        "200": { description: Alteração confirmada; mesmo custo/chave não duplica lançamento. }
+  /operacao/equipe:
+    get:
+      summary: Escala/extras; cotações e verba ocultas dos perfis operacionais.
+      parameters:
+        - { $ref: '#/components/parameters/Evento' }
+      responses:
+        "200": { description: Pedidos, fornecedores e dados financeiros permitidos. }
+    post:
+      summary: Solicita/revisa extra, aprova verba, confirma aceite manual ou lança custo da prestação.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - { $ref: '#/components/schemas/ComandoEvento' }
+              description: 'comando.acao: SOLICITAR/EDITAR (id/fornecedorId/categoria/funcao/inicio/fim/orientacoes), VERBA (limite), APROVAR (id/valor/referencia), CONFIRMAR (id/referencia), REALIZAR (id/competencia/referencia), CANCELAR (id/motivo). Não comunica com fornecedores nem efetua pagamentos.'
+      responses:
+        "200": { description: Mudança registrada, com controle de verba e conflito de escala. }
+        "409": { description: Conflito, verba insuficiente, estado/revisão incompatível. }
+  /regras:
+    get:
+      summary: Todas as versões das regras com valor (preço/CMV ocultos para perfis operacionais) e a chave de regras de cada cliente.
+      parameters:
+        - { $ref: '#/components/parameters/Empresa' }
+      responses:
+        "200": { description: '{ regras: [{ codigo, versao, titulo, status, valor, escopoTipo, escopoChave, vigenteDesde, financeiro, justificativa }], clientes: [{ id, nome, chaveRegras }] }' }
+    post:
+      summary: Nova versão de regra (somente ADMIN, vigência nunca retroativa, auditada) ou chave de regras do cliente.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [acao]
+              description: 'ALTERAR (codigo, escopoTipo GLOBAL|REGIAO|LINHA|CLIENTE|ITEM, escopoChave, valor, vigenteDesde, justificativa, titulo?) ou CHAVE_CLIENTE (clienteId, chave).'
+      responses:
+        "200": { description: Versão criada. }
+        "403": { description: Perfil sem papel ADMIN. }
+        "409": { description: Vigência retroativa, formato de valor diferente ou justificativa ausente. }
+  /cardapio:
+    get:
+      summary: Itens do cardápio; custo só para perfis comerciais/financeiros.
+      responses:
+        "200": { description: Itens com tradução, selo, estação, fornecedor e custo (ou null). }
+    patch:
+      summary: Altera tradução, selo, estação, fornecedor, ativo ou custo de um item (somente ADMIN, auditado).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id, dados]
+              properties:
+                id: { type: string, format: uuid }
+                dados: { type: object, description: 'nomeEn, nomeEs, selo, estacao, fornecedor, ativo, custo — todos opcionais.' }
+      responses:
+        "200": { description: Item atualizado. }
+  /calculos:
+    post:
+      summary: Simulação com o mesmo motor do assistente de evento (sem evento cadastrado). Não grava nada.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [data, tabela, servicos]
+              description: 'data, tabela, cliente? (chave de regras), regioes?, descontoPercentual?, restricoes?, servicos: ServicoVendido: { id?, data, linha, tier, periodo, horarioInicio, horarioFim, pax, descritivo?, reposicao?, itens?, trocas? {sugeridoId: escolhidoId}, bebidas?, restricoes?, cortesia?, periodos?, almoco? }[]'
+      responses:
+        "200": { description: 'Mesma resposta de POST /eventos/{id}/sugestao.' }
+  /clientes:
+    get:
+      summary: Autocompletar de clientes e o que cada cliente de regra própria preenche sozinho (endereço, contato, tabela). Perfis comerciais/financeiros.
+      parameters:
+        - { $ref: '#/components/parameters/Empresa' }
+      responses:
+        "200": { description: '{ clientes: [{ id, tipo, nome, documento, email, telefone, chaveRegras }], fixos: [{ chave, endereco?, contato?, tabela? }], padrao, tabelas }' }
+  /fiscal/produtos/importar:
+    get:
+      summary: Situação do catálogo fiscal (ADMIN/FINANCEIRO) — ativos, pendentes de revisão, inativos, última planilha.
+      parameters:
+        - { $ref: '#/components/parameters/Empresa' }
+      responses:
+        "200": { description: '{ ativos, pendentes, inativos, arquivo, atualizado_em }' }
+    post:
+      summary: Importa a planilha .xlsx revisada pela contabilidade (multipart empresaId + arquivo, até 5 MB). Colunas reconhecidas pelo cabeçalho; atualiza pelo código, cria novos já aprovados e inativa os que saíram. Serviço/locação (ISS) e NCM ambíguo voltam em `ignorados`.
+      responses:
+        "200": { description: '{ arquivo, produtos, novos, atualizados, inativados: [codigo], ignorados: [{ aba, linha, produto, motivo }] }' }
+        "400": { description: Arquivo ausente, maior que 5 MB ou não .xlsx }
+        "422": { description: Nenhum produto reconhecido ou códigos repetidos }
+  /eventos/{id}/nota-fiscal:
+    get:
+      summary: Rascunho da NF-e do evento (ADMIN/FINANCEIRO) — destinatário do cliente e itens da programação aprovada ligados ao catálogo fiscal.
+      responses:
+        "200": { description: '{ empresaId, destinatario: { cpfCnpj, nome }, informacoes, itens: [{ produtoId, quantidade }], semProduto: [texto], programacaoVersao, valorProposta }' }
+  /mudancas:
+    get:
+      summary: Marca da última alteração da empresa (auditoria/eventos). As telas consultam a cada 3 s e recarregam quando muda.
+      parameters:
+        - { $ref: '#/components/parameters/Empresa' }
+      responses:
+        "200": { description: '{ versao } — texto opaco; compare com o anterior.' }
+  /consultas:
+    get:
+      summary: Autopreenchimento de cadastro por bases públicas (usuário logado). CEP via ViaCEP; CNPJ via OpenCNPJ, com endereço e código IBGE refinados pelo ViaCEP.
+      parameters:
+        - { name: cep, in: query, schema: { type: string }, description: '8 dígitos (com ou sem máscara)' }
+        - { name: cnpj, in: query, schema: { type: string }, description: '14 dígitos com DV válido (com ou sem máscara)' }
+      responses:
+        "200": { description: 'CEP → { cep, logradouro, numero, complemento, bairro, cidade, uf, ibge }. CNPJ → { cnpj, razaoSocial, nomeFantasia, situacao, email, telefone, endereco }' }
+        "400": { description: CEP/CNPJ inválido }
+        "404": { description: Não encontrado na base pública }
+        "502": { description: Base pública indisponível ou lenta (limite de 8 s) }
+  /eventos/{id}/sugestao:
+    post:
+      summary: Prévia do assistente — cardápio sugerido pelo motor, quantidades, preço, CMV e travas, com as regras da data do evento. Não grava nada; orçamento/CMV só para perfis com valores.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [servicos]
+              description: 'servicos: ServicoVendido: { id?, data, linha, tier, periodo, horarioInicio, horarioFim, pax, descritivo?, reposicao?, itens?, trocas? {sugeridoId: escolhidoId}, bebidas?, restricoes?, cortesia?, periodos?, almoco? }[]; descontoPercentual? (0–1); restricoes?: { itens: [{ tipo: VEGANO|VEGETARIANO|SEM_GLUTEN|SEM_LACTOSE|SEM_ACUCAR|OUTRA, quantidade }], cobranca?: PAGO|CORTESIA }'
+      responses:
+        "200": { description: '{ cabecalho { endereco, contato, clienteChave, tabela, enderecoFixo }, servicos: [{ id, nome, comReposicao, bebidas, itens: [{ receita, item, quantidade, unidade, quantidadeTexto, cardapioItemId, bebida, selo }], alternativas: { rotulo: [{ id, nome, tier }] } }], orcamento: { linhas, totalCentavos, alimentacaoCentavos, cmv, custoEstimado } | null, avisos, bloqueios, regrasFaltando, regrasPendentes, opcoes { travado, bebidas, tabela, linhas: [{ linha, nome, tiers }] } }' }
+  /eventos/{id}/proposta:
+    post:
+      summary: '"Confirmar e gerar proposta" — confere os gates (§5), calcula pelas regras da data do evento, salva nova versão com os serviços estruturados em briefing.servicos (descritivo vendido) e aprova. Perfis comerciais; bloqueio só a diretoria libera.'
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [revisao, chave, servicos, confirmado]
+              description: 'revisao do evento, chave (uuid de idempotência), servicos (1–30), restricoes?, descontoPercentual?, confirmado: true'
+      responses:
+        "201": { description: '{ propostaId, totalCentavos, avisos }' }
+        "409": { description: '{ error: { message, problemas[] } } — dado crítico faltando, regra não cadastrada ou bloqueio.' }
+  /eventos/{id}/programacao/gerar:
+    post:
+      summary: Gera a programação a partir da proposta APROVADA, com as regras da data do evento, e salva como nova versão em RASCUNHO (estrutura completa + itens legados). Perfis ADMIN/PROGRAMACAO; exige contrato formalizado.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [revisao], properties: { revisao: { type: integer } } } } }
+      responses:
+        "201": { description: '{ id, versao, avisos, regrasPendentes }' }
+        "409": { description: '{ error: { message, problemas[] } }' }
+  /eventos/{id}/documentos/{tipo}:
+    get:
+      summary: 'Baixa um dos 4 arquivos (proposta .pptx, programacao .docx, comanda .docx, plaquinha .pdf), gerado e validado com as regras da data do evento. Comanda e plaquinha exigem programação aprovada; o sha256 é registrado em documentos_operacionais.'
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: tipo, in: path, required: true, schema: { type: string, enum: [proposta, programacao, comanda, plaquinha] } }
+      responses:
+        "200": { description: 'Arquivo; Content-Disposition com filename* UTF-8 no padrão "Pieggi {Tipo} - {contratante} - {evento} - {contato} - DD-MM-AAAA"; cabeçalho X-Documento-Sha256.' }
+        "403": { description: 'Perfil sem permissão (§13: comercial → proposta; programação → programação/comanda/plaquinha; produção e expedição → comanda).' }
+        "409": { description: '{ error: { message, problemas[] } } — bloqueio, regra ou tradução faltando, ou render reprovado.' }
+  /compras:
+    get:
+      summary: Consolida somente demandas aprovadas, arredondando após o somatório por embalagem.
+      parameters:
+        - { $ref: '#/components/parameters/Empresa' }
+        - { name: inicio, in: query, required: true, schema: { type: string, format: date } }
+        - { name: fim, in: query, required: true, schema: { type: string, format: date } }
+      responses:
+        "200": { description: Demandas, grupos, conversões e fornecedores; versões invalidadas aparecem como histórico/alerta. }
+    post:
+      summary: Cadastro/conversão aprovada ou confirmação manual de compra; sem enviar pedido externo.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [empresaId, comando]
+              properties:
+                empresaId: { type: string, format: uuid }
+                comando:
+                  type: object
+                  required: [acao, dados]
+                  properties:
+                    acao: { type: string, enum: [FORNECEDOR_CRIAR, REGRA_CRIAR, REGRA_REVOGAR, COMPRADO, REABRIR] }
+                    dados: { type: object, description: 'Payload estrito em app/api/v1/compras/route.ts. Conversões exigem proporção explícita; não há rendimento presumido.' }
+      responses:
+        "200": { description: Comando confirmado conforme o papel e versão. }
 components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: pieggi_access_token
+  parameters:
+    Empresa: { name: empresaId, in: query, required: true, schema: { type: string, format: uuid } }
+    Evento: { name: eventoId, in: query, required: true, schema: { type: string, format: uuid } }
   schemas:
+    EventoEntrada:
+      type: object
+      required: [empresaId]
+      description: 'Criação exige também titulo e cliente. Edição aceita campos comerciais/logísticos, nunca assinatura ou estado financeiro/operacional. Campos exatos em dominios/operacao/eventos.ts.'
+      properties:
+        empresaId: { type: string, format: uuid }
+        titulo: { type: string, minLength: 2, maxLength: 200 }
+        atualizadoEm: { type: string, format: date-time }
+        cliente: { type: object, required: [tipo, nome], properties: { tipo: { type: string, enum: [PF, PJ] }, nome: { type: string, minLength: 2 }, documento: { type: string }, email: { type: string }, telefone: { type: string } } }
+    ComandoEvento:
+      type: object
+      required: [eventoId, revisao, comando]
+      properties:
+        eventoId: { type: string, format: uuid }
+        revisao: { type: integer, minimum: 1 }
+        comando: { type: object, required: [acao, dados], properties: { acao: { type: string }, dados: { type: object } } }
+    FotoTarefa:
+      type: object
+      required: [tarefaId, revisao, foto]
+      properties:
+        tarefaId: { type: string, format: uuid }
+        revisao: { type: integer, minimum: 1 }
+        foto: { type: string, format: binary, description: 'JPEG/PNG/WebP validado pelo conteúdo, até 8 MB.' }
+    PdfAssinado:
+      type: object
+      required: [eventoId, revisao, assinadoEm, arquivo]
+      properties:
+        eventoId: { type: string, format: uuid }
+        revisao: { type: integer, minimum: 1 }
+        assinadoEm: { type: string, format: date-time }
+        arquivo: { type: string, format: binary, description: 'PDF já assinado, até 8 MB; assinatura atestada manualmente pelo usuário autorizado.' }
     HealthResponse:
       type: object
       required: [data, meta]
@@ -33,14 +642,44 @@ components:
           type: object
           required: [service, status, database, schema, timestamp]
           properties:
-            service: { type: string, const: start-back-api }
+            service: { type: string, const: pieggi-api }
             status: { type: string, enum: [ok, degraded] }
             database: { type: string, enum: [connected, unconfigured, unavailable] }
-            schema: { type: string, const: start_back }
+            schema: { type: string, const: pieggi }
             timestamp: { type: string, format: date-time }
         meta:
           type: object
           required: [requestId]
           properties:
             requestId: { type: string }
+    DocumentoFiscalEntrada:
+      type: object
+      required: [empresaId, ambiente, serie, naturezaOperacao, destinoOperacao, consumidorFinal, indicadorPresenca, destinatario, itens]
+      properties:
+        empresaId: { type: string, format: uuid }
+        ambiente: { type: string, enum: [HOMOLOGACAO, PRODUCAO] }
+        serie: { type: integer, minimum: 0, maximum: 999 }
+        naturezaOperacao: { type: string, maxLength: 60 }
+        destinoOperacao: { type: string, enum: ['1', '2', '3'] }
+        consumidorFinal: { type: string, enum: ['0', '1'] }
+        indicadorPresenca: { type: string, enum: ['0', '1', '2', '3', '4', '5', '9'] }
+        destinatario: { type: object, additionalProperties: true }
+        itens:
+          type: array
+          minItems: 1
+          items: { $ref: "#/components/schemas/ItemDocumentoFiscal" }
+    ItemDocumentoFiscal:
+      type: object
+      required: [descricao, ncm, cfop, unidade, quantidade, valorUnitario, origem]
+      properties:
+        produtoId: { type: string, format: uuid }
+        descricao: { type: string }
+        ncm: { type: string, pattern: '^[0-9]{8}$' }
+        cfop: { type: string, pattern: '^[0-9]{4}$' }
+        unidade: { type: string }
+        quantidade: { type: number, exclusiveMinimum: 0 }
+        valorUnitario: { type: number, minimum: 0 }
+        origem: { type: string, pattern: '^[0-9]$' }
+        cst: { type: string }
+        csosn: { type: string }
 

@@ -1,9 +1,9 @@
 import { z } from "zod";
 
 const serverEnvSchema = z.object({
-  START_BACK_SUPABASE_URL: z.url(),
-  START_BACK_SUPABASE_SERVICE_ROLE_KEY: z.string().min(20),
-  START_BACK_ALLOWED_ORIGINS: z.string().default("http://localhost:5173")
+  PIEGGI_SUPABASE_URL: z.url(),
+  PIEGGI_SUPABASE_SERVICE_ROLE_KEY: z.string().min(20),
+  PIEGGI_ALLOWED_ORIGINS: z.string().default("http://localhost:5173")
 });
 
 export type ServerEnv = z.infer<typeof serverEnvSchema>;
@@ -22,7 +22,7 @@ export function getServerEnv(): { ok: true; data: ServerEnv } | { ok: false; iss
 }
 
 export function getAllowedOrigins(): string[] {
-  return (process.env.START_BACK_ALLOWED_ORIGINS ?? "http://localhost:5173")
+  return (process.env.PIEGGI_ALLOWED_ORIGINS ?? "http://localhost:5173")
     .split(",")
     .map((origin) => origin.trim())
     .filter(Boolean);

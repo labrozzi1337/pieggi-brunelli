@@ -2,15 +2,19 @@
   "name": "start-back",
   "version": "0.1.0",
   "private": true,
-  "workspaces": ["apps/*"],
+  "workspaces": [
+    "apps/*"
+  ],
   "scripts": {
     "dev": "concurrently --kill-others-on-fail --names FRONTEND,BACKEND --prefix-colors blue,green \"npm run dev --workspace @start-back/frontend\" \"npm run dev --workspace @start-back/backend\"",
     "build": "npm run build --workspaces --if-present",
     "lint": "eslint apps --max-warnings 0",
-    "test": "vitest run",
+    "test": "vitest run --project unidade",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "check": "npm run lint && npm run typecheck && npm run test && npm run build",
-    "db:types": "npm run db:types --workspace @start-back/backend"
+    "db:types": "npm run db:types --workspace @start-back/backend",
+    "test:banco": "node scripts/banco-teste.mjs",
+    "db:migrar": "node scripts/migrar.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -26,4 +30,3 @@
     "vitest": "^5.0.3"
   }
 }
-

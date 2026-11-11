@@ -17,6 +17,7 @@ WORKDIR /app
 
 COPY --from=build /app/apps/backend/.next/standalone ./
 COPY --from=build /app/apps/backend/.next/static ./apps/backend/.next/static
+COPY --from=build /app/apps/backend/assets ./apps/backend/assets
 
 USER node
 EXPOSE 3000
