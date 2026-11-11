@@ -29,8 +29,11 @@ export function banco(): Sql {
 /** Abre as conexões do pool ao subir o servidor, para o primeiro clique não pagar o handshake. */
 export async function aquecerBanco() {
   if (!process.env.PIEGGI_DATABASE_URL) return;
-  const sql = banco();
-  await Promise.all(Array.from({ length: Math.min(4, Number(process.env.PIEGGI_DATABASE_POOL ?? 10)) }, () => sql`select 1`)).catch(() => undefined);
+  // Nunca derruba o servidor (nem o build): sem banco, a primeira requisição abre a conexão normalmente.
+  try {
+    const sql = banco();
+    await Promise.all(Array.from({ length: Math.min(4, Number(process.env.PIEGGI_DATABASE_POOL ?? 10)) }, () => sql`select 1`));
+  } catch { /* ignora */ }
 }
 
 /** Executa `fn` numa transação; qualquer exceção desfaz tudo. */
