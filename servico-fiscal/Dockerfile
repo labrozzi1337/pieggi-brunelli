@@ -1,6 +1,7 @@
+# Contexto de build = esta pasta (Vercel e docker-compose).
 FROM composer:2 AS dependencias
 WORKDIR /app
-COPY servico-fiscal/composer.json servico-fiscal/composer.lock ./
+COPY composer.json composer.lock ./
 # A imagem Composer não traz SOAP; a imagem final instala a extensão antes de executar o serviço.
 RUN composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader --ignore-platform-req=ext-gd --ignore-platform-req=ext-soap
 
@@ -14,7 +15,8 @@ RUN apk add --no-cache freetype-dev libjpeg-turbo-dev libpng-dev libxml2-dev lib
   && printf '\n[legacy_sect]\nactivate = 1\n' >> /etc/ssl/openssl.cnf
 WORKDIR /app
 COPY --from=dependencias /app/vendor ./vendor
-COPY servico-fiscal/src ./src
-COPY servico-fiscal/tests ./tests
+COPY src ./src
+COPY tests ./tests
 EXPOSE 8081
-CMD ["php", "-S", "0.0.0.0:8081", "src/index.php"]
+# Porta informada pela plataforma (PORT); 8081 no docker-compose.
+CMD ["sh", "-c", "exec php -S 0.0.0.0:${PORT:-8081} src/index.php"]

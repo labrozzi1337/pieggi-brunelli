@@ -30,8 +30,7 @@ services:
 
   servico-fiscal:
     build:
-      context: .
-      dockerfile: servico-fiscal/Dockerfile
+      context: ./servico-fiscal
     environment:
       SERVICO_FISCAL_TOKEN: ${PIEGGI_SERVICO_FISCAL_TOKEN:-}
     volumes:
